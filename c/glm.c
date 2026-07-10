@@ -28,6 +28,10 @@
 #endif
 #include "st.h"
 #include "tok.h"
+#ifdef COLI_CUDA
+#include <omp.h>
+#include "backend_cuda.h"
+#endif
 #ifdef __AVX2__
 #include <immintrin.h>
 static inline float hsum256(__m256 v){            /* somma orizzontale di 8 float */
@@ -58,7 +62,13 @@ typedef struct {
  *   fmt=2 INT4  -> q4 (2 valori per byte, impacchettati) + scala per riga
  * INT4 e' cio' che fa stare la densa residente nei 15 GB (0.5 byte/param). */
 /* fmt: 0 F32, 1 INT8, 2 INT4 (2/byte), 3 INT2 (4/byte). q4 ospita sia int4 che int2 packed. */
-typedef struct { int fmt; float *qf; int8_t *q8; uint8_t *q4; float *s; int O, I; } QT;
+typedef struct {
+    int fmt; float *qf; int8_t *q8; uint8_t *q4; float *s; int O, I;
+#ifdef COLI_CUDA
+    ColiCudaTensor *cuda;
+#endif
+    int cuda_eligible;                            /* resident tensor, never a reused expert slot */
+} QT;
 static int64_t qt_bytes(const QT *t){    /* byte residenti del tensore */
     int64_t n=(int64_t)t->O*t->I;
     if(t->fmt==0) return n*4;
@@ -119,6 +129,9 @@ typedef struct {
 } Model;
 
 static void usage_save(Model *m);        /* cache che impara: definita accanto a stats_dump */
+#ifdef COLI_CUDA
+static int g_cuda_enabled;
+#endif
 static double now_s(void){ struct timespec t; clock_gettime(CLOCK_MONOTONIC,&t); return t.tv_sec+t.tv_nsec*1e-9; }
 static double rss_gb(void){ struct rusage r; getrusage(RUSAGE_SELF,&r);
 #ifdef __APPLE__
@@ -385,7 +398,18 @@ static void matmul_i4_idot(float *y, const int8_t *xq, const float *sx, const ui
         for(int s=0;s<S;s++) y[(int64_t)s*O+o]=(float)dot_i4i8(w,xq+(int64_t)s*I,I)*sc*sx[s]; }
 }
 
-static void matmul_qt(float *y, const float *x, const QT *w, int S){
+static void matmul_qt(float *y, const float *x, QT *w, int S){
+#ifdef COLI_CUDA
+    /* The CUDA backend owns persistent copies only for model-resident tensors.
+     * Streaming expert slots are reused for different IDs and must never enter
+     * this cache. Nested OpenMP calls stay on CPU because the CUDA scratch
+     * buffers are intentionally single-stream in this first backend stage. */
+    if(g_cuda_enabled && w->cuda_eligible && !omp_in_parallel()){
+        const void *weights = w->fmt==0 ? (const void*)w->qf
+                            : w->fmt==1 ? (const void*)w->q8 : (const void*)w->q4;
+        if(coli_cuda_matmul(&w->cuda,y,x,weights,w->s,w->fmt,S,w->I,w->O)) return;
+    }
+#endif
     if(w->fmt==0){ matmul(y,x,w->qf,S,w->I,w->O); return; }
     /* int8 IDOT vince sempre (1.4-2.5x). int4 IDOT: l'autore su AVX2 trovo' che a S=1
      * non ripaga (soglia S>=2); ma su ARM/SDOT il singolo token CONVIENE (vedi g_i4s /
@@ -580,7 +604,7 @@ static void qt_from_disk(Model *m, const char *name, int O, int I, int bits, int
     }
 }
 static QT qt_load(Model *m, const char *name, int O, int I, int bits){
-    QT t; memset(&t,0,sizeof(t)); qt_from_disk(m,name,O,I,bits,0,&t); return t;
+    QT t; memset(&t,0,sizeof(t)); qt_from_disk(m,name,O,I,bits,0,&t); t.cuda_eligible=1; return t;
 }
 static float *ld(Model *m, const char *name){   /* tensore 1D f32 residente (norme/bias) */
     int64_t n=st_numel(&m->S,name); if(n<0){fprintf(stderr,"manca %s\n",name);exit(1);}
@@ -1873,6 +1897,13 @@ int main(int argc, char **argv){
     int cap  = argc>1?atoi(argv[1]):64;
     int ebits= argc>2?atoi(argv[2]):8;
     int dbits= argc>3?atoi(argv[3]):ebits;
+#ifdef COLI_CUDA
+    if(getenv("COLI_CUDA") && atoi(getenv("COLI_CUDA"))){
+        int device=getenv("COLI_GPU")?atoi(getenv("COLI_GPU")):0;
+        g_cuda_enabled=coli_cuda_init(device);
+        if(!g_cuda_enabled){ fprintf(stderr,"[CUDA] backend non disponibile, fallback CPU\n"); }
+    }
+#endif
     printf("== Motore C GLM (glm_moe_dsa), cache=%d expert/layer | expert@%d-bit densa@%d-bit | idot: " IDOT_KERNEL " ==\n", cap, ebits, dbits);
     g_mem_avail_boot = mem_available_gb();
     Model m; double t0=now_s(); model_init(&m,snap,cap,ebits,dbits);

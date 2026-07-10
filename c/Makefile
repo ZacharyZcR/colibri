@@ -28,10 +28,30 @@ CFLAGS  = -O3 -march=$(ARCH) -fopenmp -Wall -Wextra -Wno-unused-parameter -Wno-m
 LDFLAGS = -lm -fopenmp
 endif
 
+# CUDA=1 adds an opt-in backend for resident tensors. The default build remains
+# pure C and keeps the original zero-dependency runtime.
+CUDA      ?= 0
+CUDA_HOME ?= /usr/local/cuda
+NVCC      ?= $(CUDA_HOME)/bin/nvcc
+CUDA_ARCH ?= native
+CUDA_OBJ  =
+ifeq ($(CUDA),1)
+CFLAGS   += -DCOLI_CUDA
+LDFLAGS  += -L$(CUDA_HOME)/lib64 -Wl,-rpath,$(CUDA_HOME)/lib64 -lcudart -lstdc++
+CUDA_OBJ  = backend_cuda.o
+endif
+
 all: glm
 
-glm: glm.c st.h json.h tok.h tok_unicode.h compat.h
-	$(CC) $(CFLAGS) glm.c -o glm $(LDFLAGS)
+glm: glm.c st.h json.h tok.h tok_unicode.h compat.h $(CUDA_OBJ)
+	$(CC) $(CFLAGS) glm.c $(CUDA_OBJ) -o glm $(LDFLAGS)
+
+backend_cuda.o: backend_cuda.cu backend_cuda.h
+	$(NVCC) -O3 -arch=$(CUDA_ARCH) -c backend_cuda.cu -o $@
+
+cuda-test: backend_cuda.cu backend_cuda.h backend_cuda_test.cu
+	$(NVCC) -O3 -arch=$(CUDA_ARCH) backend_cuda.cu backend_cuda_test.cu -o backend_cuda_test
+	./backend_cuda_test
 
 olmoe: olmoe.c st.h json.h
 	$(CC) $(CFLAGS) olmoe.c -o olmoe $(LDFLAGS)
@@ -41,4 +61,4 @@ portable:
 	$(MAKE) glm ARCH=x86-64-v3
 
 clean:
-	rm -f olmoe glm
+	rm -f olmoe glm backend_cuda.o backend_cuda_test

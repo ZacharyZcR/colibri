@@ -9,6 +9,8 @@ c/glm
 c/olmoe
 c/iobench
 c/tok_test
+c/backend_cuda.o
+c/backend_cuda_test
 
 # oracoli tiny generati (make_glm_oracle.py) e dati benchmark scaricati
 c/glm_tiny/

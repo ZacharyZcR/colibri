@@ -89,6 +89,24 @@ COLI_MODEL=/nvme/glm52_i4 ./coli chat
 
 The engine at runtime is pure C — python is only used by the one-time converter.
 
+### Experimental resident CUDA backend
+
+This fork includes an opt-in CUDA backend for model-resident tensors. Streaming
+experts deliberately remain on the original CPU path for now: copying an expert
+from NVMe to the GPU on every use would only replace the disk bottleneck with a
+PCIe bottleneck. Resident quantized tensors are uploaded lazily once and reused.
+
+```bash
+cd c
+make cuda-test CUDA=1                  # q8/q4/q2/f32 kernel correctness
+make CUDA=1
+COLI_CUDA=1 COLI_GPU=0 SNAP=/nvme/glm52_i4 ./glm 64 4 4
+```
+
+The normal `make` build and runtime behavior are unchanged. This is the first
+stage of the hybrid design; persistent multi-GPU expert placement and a
+NUMA-local RAM backing store are not implemented yet.
+
 Useful knobs (env or flags): `--temp T` token sampling temperature (default 0.7 + nucleus 0.90 — tuned for int4; 0 = greedy), `--topp 0.7` adaptive expert top-p (30–40% less disk), `--ngen N` max tokens per answer (`:piu` in chat continues a truncated one), `AUTOPIN=0` disable the learning cache's auto-pin, `THINK=1` enable GLM-5.2's reasoning block, `DRAFT=n` MTP draft depth, `TF=1` teacher-forcing validation.
 
 **The learning cache**: the engine records which experts your usage actually routes to (`.coli_usage` next to the model, updated every turn) and at startup automatically pins the hottest ones in spare RAM. colibrì literally gets faster the more you use it.
