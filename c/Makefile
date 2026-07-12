@@ -66,7 +66,7 @@ CUDA_ARCH ?= native
 NVCCFLAGS ?= -O3 -std=c++17 -arch=$(CUDA_ARCH) -Xcompiler=-Wall,-Wextra
 PYTHON    ?= python3
 CUDA_OBJ  =
-TEST_BINS = tests/test_json$(EXE) tests/test_st$(EXE) tests/test_tier$(EXE) tests/test_grammar$(EXE) tests/test_idot$(EXE)
+TEST_BINS = tests/test_json$(EXE) tests/test_st$(EXE) tests/test_tier$(EXE) tests/test_grammar$(EXE) tests/test_idot$(EXE) tests/test_decode_batch$(EXE)
 ifeq ($(CUDA),1)
 ifeq ($(UNAME_S),Darwin)
 $(error CUDA=1 is supported only on Linux)
@@ -80,6 +80,22 @@ LDFLAGS  += -L$(CUDA_HOME)/lib64 -Wl,-rpath,$(CUDA_HOME)/lib64 -lcudart -lstdc++
 CUDA_OBJ  = backend_cuda.o
 endif
 
+# HIP=1 builds the same backend for AMD ROCm (asgard: gfx1100) via hipcc.
+HIP        ?= 0
+HIPCC      ?= /opt/rocm/bin/hipcc
+HIP_ARCH   ?= gfx1100
+ROCM_HOME  ?= /opt/rocm
+HIPCCFLAGS ?= -O3 -std=c++17 --offload-arch=$(HIP_ARCH) -I$(ROCM_HOME)/include -L$(ROCM_HOME)/lib -Wl,-rpath,$(ROCM_HOME)/lib -Wall -Wextra -Wno-unused-parameter
+GPU_TEST_DEVICES ?= 0
+ifeq ($(HIP),1)
+CFLAGS   += -DCOLI_CUDA
+LDFLAGS  += -L$(ROCM_HOME)/lib -Wl,-rpath,$(ROCM_HOME)/lib -lamdhip64 -lstdc++
+CUDA_OBJ  = backend_cuda.o skinny_int4_hip.o
+GPU_CC    = $(HIPCC) $(HIPCCFLAGS) -DCOLI_HIP -DCOLI_CUDA
+else
+GPU_CC    = $(NVCC) $(NVCCFLAGS)
+endif
+
 all: glm$(EXE)
 
 # phony 'glm' → 'glm.exe' on Windows (so 'make glm' and 'coli build' work on every platform)
@@ -89,13 +105,19 @@ glm$(EXE): glm.c st.h json.h tok.h tok_unicode.h compat.h grammar.h $(CUDA_OBJ)
 	$(CC) $(CFLAGS) glm.c $(CUDA_OBJ) -o glm$(EXE) $(LDFLAGS)
 
 backend_cuda.o: backend_cuda.cu backend_cuda.h
-	@command -v $(NVCC) >/dev/null 2>&1 || { echo "nvcc not found: set CUDA_HOME or NVCC" >&2; exit 1; }
-	$(NVCC) $(NVCCFLAGS) -c backend_cuda.cu -o $@
+	$(GPU_CC) -c backend_cuda.cu -o $@
 
-cuda-test: backend_cuda.cu backend_cuda.h tests/test_backend_cuda.cu
+skinny_int4_hip.o: skinny_int4_hip.cu
+	$(GPU_CC) -c skinny_int4_hip.cu -o $@
+
+cuda-test: backend_cuda.cu backend_cuda.h skinny_int4_hip.cu tests/test_backend_cuda.cu
+	$(GPU_CC) backend_cuda.cu skinny_int4_hip.cu tests/test_backend_cuda.cu -o backend_cuda_test$(EXE)
+	./backend_cuda_test$(EXE) $(GPU_TEST_DEVICES)
+
+cuda-bench: backend_cuda.cu backend_cuda.h tests/bench_tensor_core.cu
 	@command -v $(NVCC) >/dev/null 2>&1 || { echo "nvcc not found: set CUDA_HOME or NVCC" >&2; exit 1; }
-	$(NVCC) $(NVCCFLAGS) backend_cuda.cu tests/test_backend_cuda.cu -o backend_cuda_test$(EXE)
-	./backend_cuda_test$(EXE)
+	$(NVCC) $(NVCCFLAGS) backend_cuda.cu tests/bench_tensor_core.cu -o backend_cuda_bench$(EXE)
+	./backend_cuda_bench$(EXE)
 
 olmoe$(EXE): olmoe.c st.h json.h compat.h
 	$(CC) $(CFLAGS) olmoe.c -o olmoe$(EXE) $(LDFLAGS)
@@ -121,6 +143,8 @@ tests/test_grammar$(EXE): tests/test_grammar.c grammar.h
 
 tests/test_idot$(EXE): tests/test_idot.c glm.c st.h json.h tok.h tok_unicode.h compat.h grammar.h tier.h
 	$(CC) $(CFLAGS) $< -o $@ $(LDFLAGS)
+tests/test_decode_batch$(EXE): tests/test_decode_batch.c decode_batch.h
+	$(CC) $(CFLAGS) $< -o $@ $(LDFLAGS)
 
 test-c: $(TEST_BINS)
 	@for test in $(TEST_BINS); do ./$$test || exit 1; done
@@ -137,7 +161,7 @@ check:
 	$(MAKE) test
 
 clean:
-	rm -f olmoe$(EXE) glm$(EXE) iobench$(EXE) backend_cuda.o backend_cuda_test$(EXE) $(TEST_BINS)
+	rm -f olmoe$(EXE) glm$(EXE) iobench$(EXE) backend_cuda.o skinny_int4_hip.o backend_cuda_test$(EXE) backend_cuda_bench$(EXE) $(TEST_BINS)
 	rm -rf tests/__pycache__
 
-.PHONY: all glm cuda-test portable test-c test-python test check clean
+.PHONY: all glm cuda-test cuda-bench portable test-c test-python test check clean
