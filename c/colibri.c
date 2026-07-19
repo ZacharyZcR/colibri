@@ -373,6 +373,8 @@ typedef struct {
 #ifdef COLI_CUDA
     void *router_cuda, *router_bias_cuda;        /* device router (#431 PR-A), lazy-uploaded */
     int router_cuda_bad;                         /* upload failed once: stay on the CPU router */
+    void *ln_qa_cuda, *ln_kva_cuda;              /* attention LN constants, lazy-uploaded */
+    int attn_ln_cuda_bad;                        /* upload failed once: keep using CPU attention */
 #endif
     QT sh_gate, sh_up, sh_down;                  /* shared expert */
 } Layer;
@@ -3875,6 +3877,19 @@ static int kv_dev_sync(Model *m, Layer *l, int layer, int upto){
  * attention e o_proj girano sulla scheda di kv_b; scaricano solo out [S,D],
  * i nuovi record KV [S,kvl+R] e nulla altro. Ritorna 0 su qualsiasi errore:
  * il chiamante riesegue il percorso CPU (idempotente). */
+/* Lazily upload the attention LN constants to the layer's home device. */
+static void *attn_const_cached(Layer *l, int dev, void **slot, const float *host, size_t bytes){
+    if(l->attn_ln_cuda_bad) return NULL;
+    if(!*slot){
+        void *p=coli_cuda_pipe_alloc(dev,bytes);
+        if(!p||!coli_cuda_pipe_upload(dev,p,host,bytes)){
+            if(p) coli_cuda_pipe_free(dev,p);
+            l->attn_ln_cuda_bad=1; return NULL;
+        }
+        *slot=p;
+    }
+    return *slot;
+}
 static int attn_pipe_prefill(Model *m, Layer *l, int layer, const float *x, int x_is_dev,
                              int S, int pos_base, float *out, float *out_dev){
     Cfg *c=&m->c; int H=c->n_heads, D=c->hidden, qh=c->qk_head;
@@ -3893,13 +3908,11 @@ static int attn_pipe_prefill(Model *m, Layer *l, int layer, const float *x, int 
     float *qrd=coli_cuda_pipe_scratch(dev,1,qrb);
     float *qd =coli_cuda_pipe_scratch(dev,2,qb),  *cd =coli_cuda_pipe_scratch(dev,3,cb);
     float *ld_=coli_cuda_pipe_scratch(dev,4,lb),  *rd =coli_cuda_pipe_scratch(dev,5,rb);
-    float *w1 =coli_cuda_pipe_scratch(dev,6,(size_t)ql*4);
-    float *w2 =coli_cuda_pipe_scratch(dev,7,(size_t)kvl*4);
+    float *w1 =(float*)attn_const_cached(l,dev,&l->ln_qa_cuda,l->q_a_ln,(size_t)ql*4);
+    float *w2 =(float*)attn_const_cached(l,dev,&l->ln_kva_cuda,l->kv_a_ln,(size_t)kvl*4);
     chost=(float*)malloc(cb);
     if(!xd||!qrd||!qd||!cd||!ld_||!rd||!w1||!w2||!chost) goto done;
-    if((!x_is_dev&&!coli_cuda_pipe_upload(dev,xd,x,xb))||
-       !coli_cuda_pipe_upload(dev,w1,l->q_a_ln,(size_t)ql*4)||
-       !coli_cuda_pipe_upload(dev,w2,l->kv_a_ln,(size_t)kvl*4)) goto done;
+    if(!x_is_dev&&!coli_cuda_pipe_upload(dev,xd,x,xb)) goto done;
     /* proiezioni + norme + rope, tutto sul device */
     if(!coli_cuda_pipe_gemm(l->q_a.cuda,qrd,xd,S)) goto done;
     if(!coli_cuda_pipe_rmsnorm(dev,qrd,qrd,w1,S,ql,c->eps)) goto done;
