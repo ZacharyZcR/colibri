@@ -119,7 +119,16 @@ weights across nodes measured **+13% (2-socket) and +40% (4-socket CPU-only)**
 ([#82](https://github.com/JustVugg/colibri/issues/82)). On a 2-socket Xeon Silver
 4510 host with 6× RTX 5090, selective `COLI_NUMA=1` raised effective CPU-expert
 bandwidth from **42.42 to 58.26/65.89 GB/s** and greedy decode from **7.66 to
-9.02/9.17 tok/s** (64 tokens, `TEMP=0 DRAFT=0`, byte-identical output). Do not
+9.02/9.17 tok/s** (64 tokens, `TEMP=0 DRAFT=0`, byte-identical output). A
+placement forensics pass later reproduced the regime behind those decode
+numbers: they are the **workload-tuned optimum** — the `PIN` stats recorded on
+the measured prompt itself, so the VRAM tier holds exactly that prompt's hot
+path (measured: one recording pass collapses the CPU-tier rows by a third,
+6.9 → 8.0 tok/s, converging toward 9.x as the ranking sharpens). With a
+broad, workload-neutral stats file the same host and env measure a steady
+**6.4–6.9 tok/s**. Both numbers are real: the gap **is** the learning cache
+doing its job — steady workloads earn the tuned figure, cold diverse ones
+get the neutral figure. Do not
 blanket-interleave a GPU host: it also spreads DMA staging pages and has measured
 up to a 10× regression; generated plans enable only the selective slab policy.
 
