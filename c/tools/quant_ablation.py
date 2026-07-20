@@ -190,10 +190,36 @@ def _quant_iq3(x):
     return out.reshape(orig)
 
 
+def _blocks_pow2(dim):
+    """Largest power-of-two blocks that tile `dim` (6144 -> [2048,2048,2048]).
+    fmt=6 rotates per block on non-power-of-two dims — the padding probe (#452)
+    showed block size barely matters and padding to the next power of two costs
+    33% bytes, so tile with the coarsest split that divides."""
+    sizes, rem, off = [], dim, 0
+    while rem:
+        b = 1
+        while (b << 1) <= rem and (dim - off) % (b << 1) == 0:
+            b <<= 1
+        sizes.append(b); rem -= b; off += b
+    return sizes
+
 def _rot_quant(x, bits, group, e8=""):
-    """W -> Qn(W@Q) @ Q^T along the last (input) dim — see rotation() above."""
-    q = rotation(x.shape[-1], x.device)
-    return (_grid_or_e8(x.float() @ q, bits, group, e8) @ q.T).contiguous()
+    """W -> Qn(W@Q) @ Q^T along the last (input) dim. Power-of-two dims rotate
+    globally; others rotate block-diagonally (fmt=6's real GLM path, #452)."""
+    dim = x.shape[-1]
+    if dim & (dim - 1) == 0:
+        q = rotation(dim, x.device)
+        return (_grid_or_e8(x.float() @ q, bits, group, e8) @ q.T).contiguous()
+    # block-diagonal
+    xf = x.float()
+    out = torch.empty_like(xf)
+    off = 0
+    for b in _blocks_pow2(dim):
+        q = rotation(b, x.device)
+        sl = slice(off, off + b)
+        out[..., sl] = _grid_or_e8(xf[..., sl] @ q, bits, group, e8) @ q.T
+        off += b
+    return out.contiguous()
 
 
 # --------------------------------------------------------------------------------------
