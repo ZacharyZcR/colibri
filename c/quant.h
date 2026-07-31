@@ -1381,9 +1381,17 @@ static void matmul_mxfp4_i8(float *y, const float *x, const uint8_t *q4, const u
     free(xq); free(xsc);
 }
 
-static inline float e8_dot_row(const float *xs,const uint8_t *wrow,int I){
-    int64_t nb=e8_blocks(I);float acc=0;
-    for(int64_t b=0;b<nb;b++){
+static void matmul_e8(float *y, const float *x, const uint8_t *q, const float *unused,
+                      int S, int I, int O){
+    (void)unused;                                  /* scales live inside the blocks */
+    int64_t nb=e8_blocks(I), rb=e8_rowbytes(I);
+    #pragma omp parallel for schedule(static)
+    for(int o=0;o<O;o++){
+        const uint8_t *wrow=q+(int64_t)o*rb;
+        for(int s=0;s<S;s++){
+            const float *xs=x+(int64_t)s*I;
+            float acc=0;
+            for(int64_t b=0;b<nb;b++){
                 const uint8_t *blk=wrow+b*E8_BBYTES;
                 uint16_t dh; memcpy(&dh, blk+96, 2);
                 float d=e8_fp16_to_f32(dh);
@@ -1444,28 +1452,9 @@ static inline float e8_dot_row(const float *xs,const uint8_t *wrow,int I){
                     for(int k=0;k<n;k++) a += xs[off+k]*w[k];
                     acc+=a;
                 }
-    }
-    return acc;
-}
-
-static void matmul_e8(float *y,const float *x,const uint8_t *q,const float *unused,
-                      int S,int I,int O){
-    (void)unused;int64_t rb=e8_rowbytes(I);
-    #pragma omp parallel for schedule(static)
-    for(int o=0;o<O;o++) for(int s=0;s<S;s++)
-        y[(int64_t)s*O+o]=e8_dot_row(x+(int64_t)s*I,q+(int64_t)o*rb,I);
-}
-
-/* Decode gate and up in one OpenMP region.  Their weights are independent, but
- * the rotated activation stays hot and the runtime pays one team dispatch. */
-static void matmul_e8_pair(float *g,float *u,const float *x,const uint8_t *qg,
-                           const uint8_t *qu,int S,int I,int O){
-    int64_t rb=e8_rowbytes(I);
-    #pragma omp parallel for schedule(static)
-    for(int o=0;o<O;o++) for(int s=0;s<S;s++){
-        const float *xs=x+(int64_t)s*I;
-        g[(int64_t)s*O+o]=e8_dot_row(xs,qg+(int64_t)o*rb,I);
-        u[(int64_t)s*O+o]=e8_dot_row(xs,qu+(int64_t)o*rb,I);
+            }
+            y[(int64_t)s*O+o]=acc;
+        }
     }
 }
 

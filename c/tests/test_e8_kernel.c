@@ -82,14 +82,6 @@ int main(void) {
     printf("e8 kernel oracle: O=%d I=%d, dequant exact, matmul worst rel %.2e\n", O, I, worst);
     if (worst > 1e-5) { printf("FAIL\n"); return 1; }
 
-    float *yg = malloc((size_t)O * sizeof(float));
-    float *yu = malloc((size_t)O * sizeof(float));
-    matmul_e8_pair(yg, yu, x, packed, packed, 1, I, O);
-    for (int o = 0; o < O; o++)
-        if (yg[o] != y[o] || yu[o] != y[o]) {
-            printf("FAIL: fused pair mismatch at output %d\n", o); return 1;
-        }
-
     /* 3. rotation agreement (converter step, #452): the fixture carries a
      * rotated-weights section — packed W@Q from the Python side, the raw
      * activation, Python's Q^T x, and the float64 reference product. The C
@@ -130,6 +122,6 @@ int main(void) {
         return 1;
     }
     printf("OK\n");
-    free(yg); free(yu); free(y); free(raw);
+    free(y); free(raw);
     return 0;
 }

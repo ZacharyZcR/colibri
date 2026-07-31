@@ -288,8 +288,6 @@ static void expert_gate_up(float *g,float *u,const float *x,QT *wg,QT *wu,int S)
         matmul_i4_pair(g,u,x,wg->q4,wg->s,wu->q4,wu->s,wg->I,wg->O);
     else if(!g_no_fused_pair&&S==1&&wg->fmt==4&&wu->fmt==4&&wg->I==wu->I&&wg->O==wu->O&&wg->gs==wu->gs)
         matmul_i4_grouped_pair(g,u,x,wg->q4,wg->s,wu->q4,wu->s,S,wg->I,wg->O,wg->gs);
-    else if(!g_no_fused_pair&&wg->fmt==6&&wu->fmt==6&&wg->I==wu->I&&wg->O==wu->O)
-        matmul_e8_pair(g,u,x,wg->q4,wu->q4,S,wg->I,wg->O);
     else { matmul_qt(g,x,wg,S); matmul_qt(u,x,wu,S); }
 }
 
@@ -974,27 +972,6 @@ static void softmax(float *x,int n){ float m=-1e30f; for(int i=0;i<n;i++) if(x[i
     float s=0; for(int i=0;i<n;i++){x[i]=expf(x[i]-m);s+=x[i];} for(int i=0;i<n;i++) x[i]/=s; }
 static inline float sigmoidf(float x){ return 1.f/(1.f+expf(-x)); }
 static inline float siluf(float x){ return x/(1.f+expf(-x)); }
-
-/* The E8 down projection consumes Q^T(SiLU(gate)*up).  Build the activation
- * and apply Q's sign diagonal in the same write pass, then run only the FWHT
- * butterflies.  This removes the separate full-buffer activation and sign
- * walks from every CPU expert. */
-static void e8_silu_mul_rot(float *gate,const float *up,int nr,int dim){
-    int off=0;
-    while(off<dim){
-        int rem=dim-off,b=rem&(-rem);while(b>32768)b>>=1;
-        uint8_t bits[32768/8];e8_signs(bits,b);
-        for(int r=0;r<nr;r++){
-            float *g=gate+(int64_t)r*dim+off;
-            const float *u=up+(int64_t)r*dim+off;
-            for(int i=0;i<b;i++){
-                float v=siluf(g[i])*u[i];g[i]=(bits[i>>3]>>(i&7)&1)?-v:v;
-            }
-            e8_fwht(g,b,NULL);
-        }
-        off+=b;
-    }
-}
 
 /* RoPE interleaved su un vettore di dimensione qk_rope a posizione pos */
 static void rope_interleave(float *v, int pos, const Cfg *c){
@@ -3990,8 +3967,8 @@ static void moe(Model *m, Layer *l, int layer, float *x, int S, float *out, int 
             if(!e->slab) expert_host_ensure(m,layer,e);
 #endif
             expert_gate_up(gg,uu,xg,&e->g,&e->u,nr);
-            if(e->d.fmt==6) e8_silu_mul_rot(gg,uu,nr,I);
-            else for(int64_t z=0;z<(int64_t)nr*I;z++) gg[z]=siluf(gg[z])*uu[z];
+            for(int64_t z=0;z<(int64_t)nr*I;z++) gg[z]=siluf(gg[z])*uu[z];
+            if(e->d.fmt==6) e8_rot_rows(gg,nr,I);   /* down input is per-expert — rotate here */
             matmul_qt(hh, gg, &e->d, nr);
             for(int r=0;r<nr;r++){ float *os=out+(int64_t)rows[r]*D, wgt=rw[r], *hr=hh+(int64_t)r*D;
                 for(int d=0;d<D;d++) os[d]+=wgt*hr[d]; }
@@ -4121,8 +4098,8 @@ static void moe(Model *m, Layer *l, int layer, float *x, int S, float *out, int 
                     if(!coli_cuda_expert_mlp(e->g.cuda,e->u.cuda,e->d.cuda,hh,xg,nr)){
                         expert_host_ensure(m,layer,e);
                         expert_gate_up(gg,uu,xg,&e->g,&e->u,nr);
-                        if(e->d.fmt==6) e8_silu_mul_rot(gg,uu,nr,I);
-                        else for(int64_t z=0;z<(int64_t)nr*I;z++) gg[z]=siluf(gg[z])*uu[z];
+                        for(int64_t z=0;z<(int64_t)nr*I;z++) gg[z]=siluf(gg[z])*uu[z];
+                        if(e->d.fmt==6) e8_rot_rows(gg,nr,I);   /* down input, as on the main CPU path */
                         matmul_qt(hh,gg,&e->d,nr);
                         if(g_prof){m->cpu_expert_bytes+=qt_bytes(&e->g)+qt_bytes(&e->u)+qt_bytes(&e->d);
                             m->cpu_expert_rows+=(uint64_t)nr;}
