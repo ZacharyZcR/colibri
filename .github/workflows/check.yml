@@ -34,7 +34,7 @@ jobs:
     # (MSYS2/UCRT64), the exact toolchain the README's Windows port targets.
     name: Windows UCRT64
     runs-on: windows-latest
-    timeout-minutes: 20
+    timeout-minutes: 30
     defaults:
       run:
         shell: msys2 {0}
