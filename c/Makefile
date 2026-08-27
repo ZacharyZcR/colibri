@@ -1076,6 +1076,9 @@ tests/test_qwen36_dense_batch$(EXE): tests/test_qwen36_dense_batch.c qwen36.c qw
 tests/test_qwen38_ple_hash$(EXE): tests/test_qwen38_ple_hash.c qwen38_ple_hash.c qwen38_ple_hash.h
 	$(CC) $(CFLAGS) tests/test_qwen38_ple_hash.c qwen38_ple_hash.c -o $@ $(LDFLAGS)
 
+tests/test_qwen38_config$(EXE): tests/test_qwen38_config.c qwen38_config.c qwen38_config.h json.h
+	$(CC) $(CFLAGS) tests/test_qwen38_config.c qwen38_config.c -o $@ $(LDFLAGS)
+
 tests/test_qwen38_mhc$(EXE): tests/test_qwen38_mhc.c qwen38_mhc.c qwen38_mhc.h
 	$(CC) $(CFLAGS) tests/test_qwen38_mhc.c qwen38_mhc.c -o $@ $(LDFLAGS)
 
