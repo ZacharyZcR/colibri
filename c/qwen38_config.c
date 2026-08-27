@@ -164,6 +164,7 @@ int qwen38_config_parse(const char *json, Qwen38Config *config,
     }
     result = 0;
 done:
+    json_free(root);
     free(arena);
     return result;
 }

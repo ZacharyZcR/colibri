@@ -6,6 +6,7 @@
 #include "../qwen38_linear_layer.h"
 #include "../qwen38_ple_layer.h"
 #include "../qwen38_full_layer.h"
+#include "../qwen38_runtime.h"
 
 #include <assert.h>
 #include <stdarg.h>
@@ -76,6 +77,41 @@ static void add_tensor(Buffer *header, int *first, const char *name,
            *first ? "" : ",", name, dtype, shape, *offset, *offset + bytes);
     *first = 0;
     *offset += bytes;
+}
+
+static void add_linear_layer(Buffer *header, int *first, int layer,
+                             size_t *offset) {
+    const struct { const char *suffix, *shape; size_t count; } tensors[] = {
+        {"linear_attn.in_proj_qkv.weight", "[32,16]", 32 * 16},
+        {"linear_attn.in_proj_z.weight", "[16,16]", 16 * 16},
+        {"linear_attn.in_proj_b.weight", "[4,16]", 4 * 16},
+        {"linear_attn.in_proj_a.weight", "[4,16]", 4 * 16},
+        {"linear_attn.conv1d.weight", "[32,1,4]", 32 * 4},
+        {"linear_attn.A_log", "[4]", 4},
+        {"linear_attn.dt_bias", "[4]", 4},
+        {"linear_attn.norm.weight", "[4]", 4},
+        {"linear_attn.out_proj.weight", "[16,16]", 16 * 16},
+        {"attn_hyper_connection.hc_norm.weight", "[32]", 32},
+        {"attn_hyper_connection.input_mix_weight_down.weight", "[4,32]", 4 * 32},
+        {"attn_hyper_connection.input_mix_weight_up.weight", "[32,4]", 32 * 4},
+        {"attn_hyper_connection.block_inject_weight.weight", "[2,32]", 2 * 32},
+        {"mlp_hyper_connection.hc_norm.weight", "[32]", 32},
+        {"mlp_hyper_connection.input_mix_weight_down.weight", "[4,32]", 4 * 32},
+        {"mlp_hyper_connection.input_mix_weight_up.weight", "[32,4]", 32 * 4},
+        {"mlp_hyper_connection.block_inject_weight.weight", "[2,32]", 2 * 32},
+        {"mlp.gate.weight", "[8,16]", 8 * 16},
+        {"mlp.shared_expert.gate_proj.weight", "[6,16]", 6 * 16},
+        {"mlp.shared_expert.up_proj.weight", "[6,16]", 6 * 16},
+        {"mlp.shared_expert.down_proj.weight", "[16,6]", 16 * 6},
+        {"mlp.shared_expert_gate.weight", "[1,16]", 16},
+    };
+    for (size_t index = 0; index < sizeof(tensors) / sizeof(tensors[0]); index++) {
+        char name[256];
+        snprintf(name, sizeof(name), "model.language_model.layers.%d.%s",
+                 layer, tensors[index].suffix);
+        add_tensor(header, first, name, "BF16", tensors[index].shape,
+                   offset, tensors[index].count * 2);
+    }
 }
 
 static void source_fixture(const char *directory) {
@@ -187,6 +223,17 @@ static void source_fixture(const char *directory) {
     for (size_t index = 0; index < sizeof(full) / sizeof(full[0]); index++)
         add_tensor(&header, &first, full[index].name, "BF16", full[index].shape,
                    &offset, full[index].count * 2);
+    add_linear_layer(&header, &first, 1, &offset);
+    add_linear_layer(&header, &first, 2, &offset);
+    add_tensor(&header, &first,
+        "model.language_model.hyper_connection_mixer.hc_norm.weight",
+        "BF16", "[32]", &offset, 32 * 2);
+    add_tensor(&header, &first,
+        "model.language_model.hyper_connection_mixer.input_mix_weight_down.weight",
+        "BF16", "[4,32]", &offset, 4 * 32 * 2);
+    add_tensor(&header, &first,
+        "model.language_model.hyper_connection_mixer.input_mix_weight_up.weight",
+        "BF16", "[32,4]", &offset, 32 * 4 * 2);
     write_safetensors(directory, &header, offset);
     free(header.text);
 }
@@ -233,7 +280,7 @@ int main(void) {
     char error[256] = {0};
     assert(qwen38_model_open(&model, source, overlay, error, sizeof(error)) == 0);
     assert(model.expert_bits == 4 && model.expert_group_size == 0);
-    assert(model.source.n == 54 && model.experts.n == 80);
+    assert(model.source.n == 101 && model.experts.n == 80);
     assert(model.ple[0].row_offsets[2] == 204);
     Qwen38Expert expert;
     assert(qwen38_expert_load(&model, 4, 7, &expert, error, sizeof(error)) == 0);
@@ -316,6 +363,19 @@ int main(void) {
     for (int index = 0; index < 16; index++) assert(result[index] == 0.0f);
     qwen38_model_close(&model);
     assert(model.source.n == 0 && model.experts.n == 0);
+    Qwen38Runtime runtime;
+    float logits[32];
+    assert(qwen38_runtime_open(&runtime, source, overlay, 2,
+                               error, sizeof(error)) == 0);
+    for (int step = 0; step < 2; step++) {
+        assert(qwen38_runtime_step(&runtime, 7 + step, logits, 32,
+                                   error, sizeof(error)) == 0);
+        for (int token = 0; token < 32; token++) assert(logits[token] == 0.0f);
+    }
+    assert(runtime.length == 2);
+    assert(qwen38_runtime_step(&runtime, 9, logits, 32,
+                               error, sizeof(error)) == -1);
+    qwen38_runtime_close(&runtime);
     write_text(overlay, "qwen38_expert_meta.json",
         "{\"family\":\"qwen38_flash_next\",\"rows\":4,"
         "\"experts_per_row\":8,\"expert_bits\":4,\"group_size\":0}");

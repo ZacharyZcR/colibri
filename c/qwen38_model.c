@@ -81,6 +81,7 @@ static int metadata(Qwen38Model *model, const char *directory,
     model->config.expert_group_size = model->expert_group_size;
     result = 0;
 done:
+    json_free(root);
     free(arena);
     free(json);
     return result;
