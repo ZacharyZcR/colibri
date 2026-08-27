@@ -187,7 +187,14 @@ def _qwen38_geometry(config, context, _model_dir):
         raise ValueError(f"{family}: invalid ple_layer_ids")
     ple_dim = _required_int(config, "ple_embed_dim", family)
     ple_conv_k = _required_int(config, "ple_conv_kernel_size", family, 2)
-    fixed += len(set(ple_layers)) * ple_dim * (ple_conv_k - 1) * 4
+    hc_count = _required_int(config, "hc_count", family)
+    ngram_size = _required_int(config, "ngram_size", family, 2)
+    # PLE's dilated depthwise conv runs over all hyper-connection streams;
+    # its cache length is (kernel-1)*ngram_size. It also retains ngram_size-1
+    # int64 token ids so hashing continues across decode calls.
+    fixed += len(set(ple_layers)) * (
+        hc_count * hidden * (ple_conv_k - 1) * ngram_size * 4 +
+        (ngram_size - 1) * 8)
 
     heads = _required_int(config, "num_attention_heads", family)
     kv_heads = _required_int(config, "num_key_value_heads", family)
@@ -198,7 +205,6 @@ def _qwen38_geometry(config, context, _model_dir):
     state = n_full * context * (
         2 * kv_heads * head_dim + index_kv_heads * index_dim) * 4
 
-    hc_count = _required_int(config, "hc_count", family)
     ws_linear = context * (2 * conv_width + hidden) * 4
     ws_full = context * ((heads + 2 * kv_heads) * head_dim +
                          (index_heads + index_kv_heads) * index_dim +

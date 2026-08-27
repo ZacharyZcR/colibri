@@ -168,7 +168,7 @@ class FamilyRegistryTest(unittest.TestCase):
             "indexer_compress_ratio": 4,
             "hc_count": 4, "hc_lowrank": 320,
             "ple_layer_ids": [2], "ple_embed_dim": 2560,
-            "ple_conv_kernel_size": 4,
+            "ple_conv_kernel_size": 4, "ngram_size": 3,
         }
         config = {"model_type": "qwen4_exp", "text_config": text}
         with tempfile.TemporaryDirectory() as tmp:
@@ -184,8 +184,8 @@ class FamilyRegistryTest(unittest.TestCase):
             12 * 4096 * (2 * 2 * 256 + 128) * 4)
         self.assertEqual(
             geometry.fixed_state_bytes,
-            (36 * (48 * 128 * 128 + (2 * 16 * 128 + 48 * 128) * 3) +
-             2560 * 3) * 4)
+            36 * (48 * 128 * 128 + (2 * 16 * 128 + 48 * 128) * 3) * 4 +
+            4 * 2560 * 3 * 3 * 4 + 2 * 8)
         self.assertEqual(geometry.workspace_bytes, 4096 * 23040 * 4)
 
         main = resolved.descriptor.expert_inventory(
@@ -209,7 +209,7 @@ class FamilyRegistryTest(unittest.TestCase):
             "indexer_n_heads": 1, "indexer_kv_heads": 1,
             "indexer_head_dim": 8, "hc_count": 2,
             "ple_layer_ids": [], "ple_embed_dim": 32,
-            "ple_conv_kernel_size": 4,
+            "ple_conv_kernel_size": 4, "ngram_size": 3,
         }
         resolved = type("R", (), {"descriptor": family,
                                   "family_config": config, "model_dir": "."})()

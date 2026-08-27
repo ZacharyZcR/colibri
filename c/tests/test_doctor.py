@@ -124,7 +124,7 @@ class DoctorTest(unittest.TestCase):
             "indexer_n_heads": 1, "indexer_kv_heads": 1,
             "indexer_head_dim": 8, "hc_count": 2,
             "ple_layer_ids": [2], "ple_embed_dim": 32,
-            "ple_conv_kernel_size": 4,
+            "ple_conv_kernel_size": 4, "ngram_size": 3,
         }
         (self.model / "config.json").write_text(json.dumps({
             "model_type": "qwen4_exp", "text_config": text,
