@@ -3,6 +3,8 @@ glm_tiny/
 glm53_tiny/
 glm53_fp8_tiny/
 glm53_flash
+qwen38_tiny/
+qwen38_flash_next
 olmoe_hf/
 olmoe_i4/
 .build-config

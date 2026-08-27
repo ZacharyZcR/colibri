@@ -1062,6 +1062,24 @@ endif
 qwen36$(EXE): qwen36.c qwen36_tier.h st.h json.h compat.h $(QWEN36_TIER_SRC) $(CUDA_OBJ)
 	$(CC) $(QWEN36_CFLAGS) qwen36.c $(QWEN36_TIER_SRC) $(CUDA_OBJ) -o qwen36$(EXE) $(QWEN36_LDFLAGS)
 
+QWEN38_SRC = qwen38_flash_next.c qwen38_runtime.c qwen38_model.c \
+	qwen38_expert.c qwen38_moe_layer.c qwen38_mhc.c qwen38_delta_layer.c \
+	qwen38_delta.c qwen38_linear_layer.c qwen38_full_layer.c \
+	qwen38_attention.c qwen38_qsa.c qwen38_ple_layer.c qwen38_ple_hash.c \
+	qwen38_config.c qwen38_ple_table.c
+
+qwen38_flash_next$(EXE): $(QWEN38_SRC) qwen38_runtime.h qwen38_model.h \
+		qwen38_config.h st.h json.h
+	$(CC) $(CFLAGS) $(QWEN38_SRC) -o $@ $(LDFLAGS)
+
+.PHONY: qwen38-tiny-generate qwen38-tiny-check
+qwen38-tiny-generate:
+	$(PYTHON) tools/make_qwen38_tiny.py --output ./qwen38_tiny
+
+qwen38-tiny-check: qwen38-tiny-generate qwen38_flash_next$(EXE)
+	$(PYTHON) tests/test_qwen38_engine.py --binary ./qwen38_flash_next$(EXE) \
+		--fixture ./qwen38_tiny
+
 # Context-size gates: KV layout, growth across requests, and the attention
 # capacity. Includes qwen36.c directly, so no model file is needed.
 # Same tier sources as the engine: the test includes qwen36.c, so with CUDA=1

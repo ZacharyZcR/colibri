@@ -1,0 +1,2 @@
+# deterministic fixture generation; the Transformers oracle is committed
+numpy>=1.24
