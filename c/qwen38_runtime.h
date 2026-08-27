@@ -26,6 +26,7 @@ int qwen38_runtime_open(Qwen38Runtime *runtime, const char *source_dir,
                         const char *expert_dir, size_t capacity,
                         char *error, size_t error_size);
 void qwen38_runtime_close(Qwen38Runtime *runtime);
+void qwen38_runtime_reset(Qwen38Runtime *runtime);
 int qwen38_runtime_step(Qwen38Runtime *runtime, int64_t token,
                         float *logits, size_t logits_count,
                         char *error, size_t error_size);

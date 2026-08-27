@@ -141,6 +141,23 @@ def config():
     }}
 
 
+def tokenizer():
+    added = [
+        {"id": token, "content": f"<t{token:03d}>", "single_word": False,
+         "lstrip": False, "rstrip": False, "normalized": False, "special": True}
+        for token in range(32)
+    ]
+    return {
+        "version": "1.0", "truncation": None, "padding": None,
+        "added_tokens": added, "normalizer": None, "pre_tokenizer": None,
+        "post_processor": None, "decoder": None,
+        "model": {"type": "BPE", "dropout": None, "unk_token": None,
+                  "continuing_subword_prefix": "", "end_of_word_suffix": "",
+                  "fuse_unk": False, "byte_fallback": False,
+                  "ignore_merges": True, "vocab": {"x": 31}, "merges": []},
+    }
+
+
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("--output", type=Path, required=True)
@@ -149,6 +166,8 @@ def main():
     source.mkdir(parents=True, exist_ok=True)
     experts.mkdir(parents=True, exist_ok=True)
     (source / "config.json").write_text(json.dumps(config()), encoding="utf-8")
+    (source / "tokenizer.json").write_text(
+        json.dumps(tokenizer(), separators=(",", ":")), encoding="utf-8")
     write_safetensors(source / "model.safetensors", source_tensors())
     overlay = OrderedDict()
     for row in range(5):

@@ -176,7 +176,7 @@ class FamilyRegistryTest(unittest.TestCase):
             (root / "config.json").write_text(json.dumps(config), encoding="utf-8")
             resolved = resolve_model(root)
         self.assertEqual(resolved.descriptor.id, "qwen38_flash_next")
-        self.assertFalse(resolved.descriptor.runtime_available)
+        self.assertTrue(resolved.descriptor.runtime_available)
         geometry = planner_geometry(resolved, 4096)
         self.assertEqual(geometry.configured_experts, 512)
         self.assertEqual(

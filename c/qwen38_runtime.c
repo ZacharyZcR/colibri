@@ -68,6 +68,39 @@ void qwen38_runtime_close(Qwen38Runtime *runtime) {
     memset(runtime, 0, sizeof(*runtime));
 }
 
+static void reset_ple(Qwen38PleLayer *ple, const Qwen38Config *config) {
+    if (!ple->conv_state) return;
+    size_t hyper = (size_t)config->hc_count * config->hidden_size;
+    size_t state = hyper * (size_t)(config->ple_conv_kernel - 1) *
+                   config->ngram_size;
+    memset(ple->conv_state, 0, state * sizeof(float));
+    for (int index = 0; index < config->ngram_size - 1; index++)
+        ple->history[index] = config->eos_token_id;
+}
+
+void qwen38_runtime_reset(Qwen38Runtime *runtime) {
+    if (!runtime || !runtime->layers) return;
+    Qwen38Config *config = &runtime->model.config;
+    size_t recurrent = (size_t)config->linear_value_heads *
+        config->linear_key_dim * config->linear_value_dim;
+    size_t conv_dim = 2ULL * config->linear_key_heads * config->linear_key_dim +
+                       (size_t)config->linear_value_heads * config->linear_value_dim;
+    size_t convolution = conv_dim * (size_t)(config->linear_conv_kernel - 1);
+    for (int layer = 0; layer < config->num_hidden_layers; layer++) {
+        Qwen38RuntimeLayer *item = &runtime->layers[layer];
+        if (item->full_attention) {
+            item->full.state.length = 0;
+            if (item->full.has_ple) reset_ple(&item->full.ple, config);
+        } else {
+            memset(item->linear.state.recurrent, 0, recurrent * sizeof(float));
+            memset(item->linear.state.convolution, 0,
+                   convolution * sizeof(float));
+            if (item->linear.has_ple) reset_ple(&item->linear.ple, config);
+        }
+    }
+    runtime->length = 0;
+}
+
 int qwen38_runtime_open(Qwen38Runtime *runtime, const char *source_dir,
                         const char *expert_dir, size_t capacity,
                         char *error, size_t error_size) {

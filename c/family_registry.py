@@ -753,9 +753,9 @@ FAMILIES = (
         config_section="text_config",
         limits=FamilyLimits(8192, 262144, 1024, 8192, 1, 8, "Q38_MAXT"),
         capabilities=FamilyCapabilities(False, False, False, True),
-        has_gateway_adapter=False,
+        has_gateway_adapter=True,
         has_cli_adapter=False,
-        runtime_available=False,
+        runtime_available=True,
         tune_prompt_template=(
             "<|im_start|>user\n{prompt}<|im_end|>\n<|im_start|>assistant\n<think>\n"),
     ),

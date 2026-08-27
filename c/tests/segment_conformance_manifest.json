@@ -45,6 +45,13 @@
       "real_adapter_required": true
     },
     {
+      "family_id": "qwen38_flash_next",
+      "state_schema": "fixture/qwen38-qsa-deltanet-mhc-ple-v1",
+      "state_components": ["attention_kv", "qsa_indexer", "deltanet_recurrent", "convolution", "mhc", "ple_history"],
+      "oracle": {"kind": "generated_tiny", "path": "tools/make_qwen38_tiny.py"},
+      "real_adapter_required": true
+    },
+    {
       "family_id": "deepseek_v4",
       "state_schema": "fixture/dsv4-mhc-compressed-v1",
       "state_components": ["mhc", "window_attention", "compressed_attention", "compressor", "indexer"],

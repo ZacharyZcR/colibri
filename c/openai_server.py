@@ -1182,7 +1182,7 @@ def render_chat_qwen(messages, enable_thinking=False, reasoning_effort=None, too
     if not isinstance(messages, list) or not messages:
         raise APIError(400, "`messages` must be a non-empty array.", "messages")
     if tools or tool_choice not in (None, "none"):
-        raise APIError(400, "Tool use is not wired up for the qwen36 engine yet.",
+        raise APIError(400, "Tool use is not wired up for this Qwen engine yet.",
                        "tools", "unsupported_parameter")
     parts = []
     for index, message in enumerate(messages):
@@ -1376,7 +1376,7 @@ def render_chat_for_arch(messages, enable_thinking=False, reasoning_effort=None,
         return render_chat_inkling(messages, enable_thinking, reasoning_effort, tools,
                                     tool_choice, audio_out=audio_out)
     renderer = (render_chat_kimi if ARCH == "kimi" else
-                render_chat_qwen if ARCH == "qwen36" else
+                render_chat_qwen if ARCH in ("qwen36", "qwen38_flash_next") else
                 render_chat_v4 if ARCH == "deepseek_v4" else
                 render_chat_olmoe if ARCH == "olmoe" else render_chat)
     return renderer(messages, enable_thinking, reasoning_effort, tools, tool_choice)

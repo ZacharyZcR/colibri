@@ -1069,7 +1069,7 @@ QWEN38_SRC = qwen38_flash_next.c qwen38_runtime.c qwen38_model.c \
 	qwen38_config.c qwen38_ple_table.c
 
 qwen38_flash_next$(EXE): $(QWEN38_SRC) qwen38_runtime.h qwen38_model.h \
-		qwen38_config.h st.h json.h
+		qwen38_config.h st.h json.h tok.h tok_unicode.h tok_unicode_o200k.h
 	$(CC) $(CFLAGS) $(QWEN38_SRC) -o $@ $(LDFLAGS)
 
 .PHONY: qwen38-tiny-generate qwen38-tiny-check
@@ -1078,6 +1078,8 @@ qwen38-tiny-generate:
 
 qwen38-tiny-check: qwen38-tiny-generate qwen38_flash_next$(EXE)
 	$(PYTHON) tests/test_qwen38_engine.py --binary ./qwen38_flash_next$(EXE) \
+		--fixture ./qwen38_tiny
+	$(PYTHON) tests/test_qwen38_serve.py --binary ./qwen38_flash_next$(EXE) \
 		--fixture ./qwen38_tiny
 
 # Context-size gates: KV layout, growth across requests, and the attention
@@ -1717,7 +1719,7 @@ check:
 	$(MAKE) portable
 	$(MAKE) test
 
-install: colibri$(EXE) glm53_flash$(EXE) inkling$(EXE) kimi_k3$(EXE) olmoe$(EXE) qwen36$(EXE) \
+install: colibri$(EXE) glm53_flash$(EXE) inkling$(EXE) kimi_k3$(EXE) olmoe$(EXE) qwen36$(EXE) qwen38_flash_next$(EXE) \
 	$(if $(filter 1,$(COLI_V4_SUPPORTED)),deepseek-v4,)
 	$(INSTALL) -d $(DESTDIR)$(BINDIR)
 	$(INSTALL) -d $(DESTDIR)$(LIBEXECDIR)
@@ -1729,6 +1731,7 @@ install: colibri$(EXE) glm53_flash$(EXE) inkling$(EXE) kimi_k3$(EXE) olmoe$(EXE)
 	$(INSTALL) -m 755 kimi_k3$(EXE) $(DESTDIR)$(LIBEXECDIR)/kimi_k3$(EXE)
 	$(INSTALL) -m 755 olmoe$(EXE) $(DESTDIR)$(LIBEXECDIR)/olmoe$(EXE)
 	$(INSTALL) -m 755 qwen36$(EXE) $(DESTDIR)$(LIBEXECDIR)/qwen36$(EXE)
+	$(INSTALL) -m 755 qwen38_flash_next$(EXE) $(DESTDIR)$(LIBEXECDIR)/qwen38_flash_next$(EXE)
 	@if [ -f deepseek_v4$(EXE) ]; then \
 	  $(INSTALL) -m 755 deepseek_v4$(EXE) $(DESTDIR)$(LIBEXECDIR)/deepseek_v4$(EXE); \
 	fi
