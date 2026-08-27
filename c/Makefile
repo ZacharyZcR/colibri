@@ -1081,6 +1081,10 @@ qwen38-tiny-check: qwen38-tiny-generate qwen38_flash_next$(EXE)
 		--fixture ./qwen38_tiny
 	$(PYTHON) tests/test_qwen38_serve.py --binary ./qwen38_flash_next$(EXE) \
 		--fixture ./qwen38_tiny
+	$(MAKE) tests/qwen38_segment_gate$(EXE)
+	Q38_EXPERTS="$(CURDIR)/qwen38_tiny/experts" \
+		./tests/qwen38_segment_gate$(EXE) qwen38_flash_next \
+		"$(CURDIR)/qwen38_tiny/source" 0 2 4 8
 
 # Context-size gates: KV layout, growth across requests, and the attention
 # capacity. Includes qwen36.c directly, so no model file is needed.
@@ -1407,12 +1411,18 @@ SEGMENT_ENGINE_OBJS = \
 	$(SEGMENT_BUILD_DIR)/inkling.o \
 	$(SEGMENT_BUILD_DIR)/kimi.o \
 	$(SEGMENT_BUILD_DIR)/olmoe.o \
-	$(SEGMENT_BUILD_DIR)/qwen36.o
+	$(SEGMENT_BUILD_DIR)/qwen36.o \
+	$(SEGMENT_BUILD_DIR)/qwen38_segment.o
+SEGMENT_QWEN38_NAMES = qwen38_model qwen38_expert qwen38_moe_layer qwen38_mhc \
+	qwen38_delta_layer qwen38_delta qwen38_linear_layer qwen38_full_layer \
+	qwen38_attention qwen38_qsa qwen38_ple_layer qwen38_ple_hash \
+	qwen38_config qwen38_ple_table
+SEGMENT_QWEN38_OBJS = $(addprefix $(SEGMENT_BUILD_DIR)/,$(addsuffix .o,$(SEGMENT_QWEN38_NAMES)))
 SEGMENT_V4_UNITS = $(filter-out COLI_V4_UNIT_PROMPT \
 	COLI_V4_UNIT_GENERATE_STATS,$(V4_TARGET_UNITS)) $(V4_SEGMENT_UNIT)
 SEGMENT_V4_OBJS = $(addprefix $(SEGMENT_BUILD_DIR)/,$(addsuffix .o,$(SEGMENT_V4_UNITS)))
 SEGMENT_V4_REGISTRY_OBJ = $(SEGMENT_BUILD_DIR)/expert_store_registry.o
-SEGMENT_ALL_OBJS = $(SEGMENT_ENGINE_OBJS) $(SEGMENT_V4_OBJS) \
+SEGMENT_ALL_OBJS = $(SEGMENT_ENGINE_OBJS) $(SEGMENT_QWEN38_OBJS) $(SEGMENT_V4_OBJS) \
 	$(SEGMENT_V4_REGISTRY_OBJ)
 
 $(SEGMENT_BUILD_DIR):
@@ -1438,6 +1448,13 @@ $(SEGMENT_BUILD_DIR)/qwen36.o: qwen36.c segment_runtime.h \
 		segment_adapters.h segment_adapter_internal.h st.h | $(SEGMENT_BUILD_DIR)
 	$(CC) $(SEGMENT_CPU_CFLAGS) -DQWEN36_NO_MAIN -c qwen36.c -o $@
 
+$(SEGMENT_BUILD_DIR)/qwen38_segment.o: qwen38_segment.c qwen38_runtime.h \
+		segment_runtime.h segment_adapters.h segment_adapter_internal.h | $(SEGMENT_BUILD_DIR)
+	$(CC) $(SEGMENT_CPU_CFLAGS) -c qwen38_segment.c -o $@
+
+$(SEGMENT_QWEN38_OBJS): $(SEGMENT_BUILD_DIR)/%.o: %.c %.h | $(SEGMENT_BUILD_DIR)
+	$(CC) $(SEGMENT_CPU_CFLAGS) -c $< -o $@
+
 $(SEGMENT_V4_OBJS): $(SEGMENT_BUILD_DIR)/%.o: deepseek_v4.c deepseek_v4.h \
 		deepseek_v4_internal.h segment_runtime.h segment_adapters.h \
 		segment_adapter_internal.h st.h | $(SEGMENT_BUILD_DIR)
@@ -1458,6 +1475,14 @@ tests/test_segment_adapters_real$(EXE): tests/test_segment_adapters_real.c \
 	$(CC) $(SEGMENT_CPU_CFLAGS) tests/test_segment_adapters_real.c \
 		segment_runtime.c $(SEGMENT_ALL_OBJS) -o $@ $(NOCUDA_LDFLAGS)
 
+tests/qwen38_segment_gate$(EXE): tests/test_segment_adapters_real.c \
+		segment_runtime.c segment_runtime.h segment_adapters.h \
+		$(SEGMENT_BUILD_DIR)/qwen38_segment.o $(SEGMENT_QWEN38_OBJS)
+	$(CC) $(SEGMENT_CPU_CFLAGS) -DQWEN38_SEGMENT_ONLY \
+		tests/test_segment_adapters_real.c segment_runtime.c \
+		$(SEGMENT_BUILD_DIR)/qwen38_segment.o $(SEGMENT_QWEN38_OBJS) \
+		-o $@ $(NOCUDA_LDFLAGS)
+
 .PHONY: segment-adapters segment-adapters-real
 segment-adapters: tests/test_segment_adapters_registration$(EXE)
 	./tests/test_segment_adapters_registration$(EXE)
@@ -1472,12 +1497,15 @@ segment-adapters-real: tests/test_segment_adapters_real$(EXE)
 	@test -n "$(KIMI_SEGMENT_MODEL)" || { echo "set KIMI_SEGMENT_MODEL" >&2; exit 2; }
 	@test -n "$(OLMOE_SEGMENT_MODEL)" || { echo "set OLMOE_SEGMENT_MODEL" >&2; exit 2; }
 	@test -n "$(QWEN_SEGMENT_MODEL)" || { echo "set QWEN_SEGMENT_MODEL" >&2; exit 2; }
+	@test -n "$(QWEN38_SEGMENT_MODEL)" || { echo "set QWEN38_SEGMENT_MODEL" >&2; exit 2; }
+	@test -n "$(QWEN38_SEGMENT_EXPERTS)" || { echo "set QWEN38_SEGMENT_EXPERTS" >&2; exit 2; }
 	@test -n "$(DEEPSEEK_SEGMENT_MODEL)" || { echo "set DEEPSEEK_SEGMENT_MODEL" >&2; exit 2; }
 	OMP_NUM_THREADS=$${OMP_NUM_THREADS:-2} ./tests/test_segment_adapters_real$(EXE) glm "$(GLM_SEGMENT_MODEL)" 0 3 5 8
 	OMP_NUM_THREADS=$${OMP_NUM_THREADS:-2} ./tests/test_segment_adapters_real$(EXE) inkling "$(INKLING_SEGMENT_MODEL)" 0 4 8 8
 	OMP_NUM_THREADS=$${OMP_NUM_THREADS:-2} ./tests/test_segment_adapters_real$(EXE) kimi "$(KIMI_SEGMENT_MODEL)" 0 3 6 8
 	OMP_NUM_THREADS=$${OMP_NUM_THREADS:-2} ./tests/test_segment_adapters_real$(EXE) olmoe "$(OLMOE_SEGMENT_MODEL)" 0 2 4 8
 	OMP_NUM_THREADS=$${OMP_NUM_THREADS:-2} ./tests/test_segment_adapters_real$(EXE) qwen36 "$(QWEN_SEGMENT_MODEL)" 0 4 8 8
+	Q38_EXPERTS="$(QWEN38_SEGMENT_EXPERTS)" OMP_NUM_THREADS=$${OMP_NUM_THREADS:-2} ./tests/test_segment_adapters_real$(EXE) qwen38_flash_next "$(QWEN38_SEGMENT_MODEL)" 0 2 4 8
 	OMP_NUM_THREADS=$${OMP_NUM_THREADS:-2} ./tests/test_segment_adapters_real$(EXE) deepseek_v4 "$(DEEPSEEK_SEGMENT_MODEL)" 0 1 3 8
 
 V4_HOT_TEST_OBJ = COLI_V4_UNIT_EXPERT_STORE_HOT_ROWS16_TEST.o

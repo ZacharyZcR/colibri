@@ -45,6 +45,12 @@ is reproducible with official Transformers 5.16.1 via
 `c/tools/make_qwen38_ref.py`. ASan/UBSan covers the same executable and gateway
 flow in development.
 
+The engine-owned Segment adapter advertises the expanded mHC stream as its
+boundary state, opens only the requested layer range, keeps QSA, DeltaNet and
+PLE state isolated per session, and supports transactional streamed snapshots.
+The same tiny gate compares a full range with two chained ranges and verifies
+snapshot continuation.
+
 The tiny oracle proves implementation parity at the covered geometry. It is
 not a performance or quality claim for the 125B-A6B checkpoint. Full-model
 throughput, long-context stability, and hardware-specific acceptance still

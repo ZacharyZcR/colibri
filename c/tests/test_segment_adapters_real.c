@@ -41,12 +41,17 @@ static int memory_read(void *user_data, void *data, size_t size) {
 }
 
 static int register_all(void) {
+#ifdef QWEN38_SEGMENT_ONLY
+    return coli_qwen38_segment_adapter_register();
+#else
     return coli_glm_segment_adapter_register() ||
            coli_inkling_segment_adapter_register() ||
            coli_kimi_segment_adapter_register() ||
            coli_olmoe_segment_adapter_register() ||
            coli_qwen36_segment_adapter_register() ||
+           coli_qwen38_segment_adapter_register() ||
            coli_deepseek_v4_segment_adapter_register();
+#endif
 }
 
 static int close_enough(const float *left, const float *right, size_t count,
@@ -185,7 +190,7 @@ int main(int argc, char **argv) {
     for (uint32_t item = 0; item < width; item++)
         next_input[item] = 0.021f * cosf((float)item * 0.047f) - 0.002f;
     const int32_t first_tokens[2] = {7, 23};
-    const int32_t next_token[1] = {41};
+    const int32_t next_token[1] = {9};
 
     if (run_rows(full, 0, first_rows, width, first_input, full_first,
                  first_tokens, error, sizeof(error)) ||
