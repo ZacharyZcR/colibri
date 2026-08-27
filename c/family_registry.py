@@ -183,7 +183,7 @@ def _qwen38_geometry(config, context, _model_dir):
     ple_layers = config.get("ple_layer_ids", [])
     if not isinstance(ple_layers, list) or any(
             isinstance(layer, bool) or not isinstance(layer, int) or
-            layer < 0 or layer >= layers for layer in ple_layers):
+            layer < 1 or layer > layers for layer in ple_layers):
         raise ValueError(f"{family}: invalid ple_layer_ids")
     ple_dim = _required_int(config, "ple_embed_dim", family)
     ple_conv_k = _required_int(config, "ple_conv_kernel_size", family, 2)
