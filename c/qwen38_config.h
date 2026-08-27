@@ -20,6 +20,7 @@ typedef struct {
     int indexer_budget, indexer_compress_ratio;
     int indexer_head_dim, indexer_kv_heads, indexer_heads;
     int mtp_layers, full_attention_layers;
+    int expert_group_size;
     int ple_layer_count, ple_layers[QWEN38_MAX_PLE_LAYERS];
     float rms_norm_eps, rope_theta, partial_rotary_factor;
     uint8_t layer_is_full[QWEN38_MAX_LAYERS];

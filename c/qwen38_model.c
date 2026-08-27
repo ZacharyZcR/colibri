@@ -1,3 +1,6 @@
+#ifndef _GNU_SOURCE
+#define _GNU_SOURCE
+#endif
 #include "qwen38_model.h"
 
 #include <stdarg.h>
@@ -75,6 +78,7 @@ static int metadata(Qwen38Model *model, const char *directory,
     }
     model->expert_bits = (int)bits->num;
     model->expert_group_size = (int)group->num;
+    model->config.expert_group_size = model->expert_group_size;
     result = 0;
 done:
     free(arena);

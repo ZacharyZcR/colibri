@@ -1,5 +1,6 @@
 #define _GNU_SOURCE
 #include "../qwen38_model.h"
+#include "../qwen38_expert.h"
 
 #include <assert.h>
 #include <stdarg.h>
@@ -154,6 +155,18 @@ int main(void) {
     assert(model.expert_bits == 4 && model.expert_group_size == 0);
     assert(model.source.n == 4 && model.experts.n == 80);
     assert(model.ple[0].row_offsets[2] == 4);
+    Qwen38Expert expert;
+    assert(qwen38_expert_load(&model, 4, 7, &expert, error, sizeof(error)) == 0);
+    for (int index = 0; index < 3 * 16 * 6; index++) assert(expert.weights[index] == 0);
+    qwen38_expert_close(&expert);
+    float input[16], moe_output[16], moe_workspace[28];
+    for (int index = 0; index < 16; index++) input[index] = 1.0f;
+    const int expert_ids[] = {0, 7};
+    const float router_weights[] = {0.25f, 0.75f};
+    assert(qwen38_moe_forward(&model, 4, input, expert_ids, router_weights, 2,
+                              moe_output, moe_workspace, 28,
+                              error, sizeof(error)) == 0);
+    for (int index = 0; index < 16; index++) assert(moe_output[index] == 0.0f);
     uint64_t row = 3; float result[16];
     assert(qwen38_ple_table_lookup(&model.ple[0], &row, 1, result, 16) == 0);
     for (int index = 0; index < 16; index++) assert(result[index] == 0.0f);
