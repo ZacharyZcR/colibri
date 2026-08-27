@@ -40,18 +40,33 @@ static void apply_rope(float *key, const float *cosine, const float *sine,
     }
 }
 
-int qwen38_qsa_select(const float *query, int query_heads,
-                      const float *raw_keys, size_t token_count, int head_dim,
-                      const float *key_norm_weight, float norm_eps,
-                      const float *rope_cos, const float *rope_sin,
-                      int rotary_dim, int compress_ratio, int token_budget,
-                      uint8_t *selected, float *pooled_key,
-                      Qwen38QsaEntry *heap, size_t heap_capacity) {
+static void apply_text_rope(float *key, size_t position, int rotary_dim,
+                            float theta) {
+    int half = rotary_dim / 2;
+    for (int dim = 0; dim < half; dim++) {
+        float angle = (float)position /
+            powf(theta, (float)(2 * dim) / (float)rotary_dim);
+        float cosine = cosf(angle), sine = sinf(angle);
+        float first = key[dim], second = key[dim + half];
+        key[dim] = first * cosine - second * sine;
+        key[dim + half] = second * cosine + first * sine;
+    }
+}
+
+static int select_impl(const float *query, int query_heads,
+                       const float *raw_keys, size_t token_count, int head_dim,
+                       const float *key_norm_weight, float norm_eps,
+                       const float *rope_cos, const float *rope_sin,
+                       int rotary_dim, float rope_theta, int text_rope,
+                       int compress_ratio, int token_budget, uint8_t *selected,
+                       float *pooled_key, Qwen38QsaEntry *heap,
+                       size_t heap_capacity) {
     if (!query || query_heads < 1 || !raw_keys || !token_count || head_dim < 1 ||
         !key_norm_weight || norm_eps <= 0.0f || !selected || !pooled_key ||
         compress_ratio < 1 || token_budget < compress_ratio ||
         rotary_dim < 0 || rotary_dim > head_dim || (rotary_dim & 1) ||
-        (rotary_dim && (!rope_cos || !rope_sin))) return -1;
+        (rotary_dim && !text_rope && (!rope_cos || !rope_sin)) ||
+        (text_rope && !(rope_theta > 0.0f))) return -1;
     size_t complete_blocks = token_count / (size_t)compress_ratio;
     size_t top_blocks = (size_t)token_budget / (size_t)compress_ratio;
     if (top_blocks > complete_blocks) top_blocks = complete_blocks;
@@ -78,11 +93,15 @@ int qwen38_qsa_select(const float *query, int query_heads,
             float norm = 1.0f / sqrtf((float)(squares / head_dim) + norm_eps);
             for (int dim = 0; dim < head_dim; dim++)
                 pooled_key[dim] *= norm * (1.0f + key_norm_weight[dim]);
-            if (rotary_dim)
-                apply_rope(pooled_key,
-                           rope_cos + first_token * (size_t)rotary_dim,
-                           rope_sin + first_token * (size_t)rotary_dim,
-                           rotary_dim);
+            if (rotary_dim) {
+                if (text_rope)
+                    apply_text_rope(pooled_key, first_token, rotary_dim, rope_theta);
+                else
+                    apply_rope(pooled_key,
+                               rope_cos + first_token * (size_t)rotary_dim,
+                               rope_sin + first_token * (size_t)rotary_dim,
+                               rotary_dim);
+            }
 
             float score = 0.0f;
             for (int head = 0; head < query_heads; head++) {
@@ -110,4 +129,30 @@ int qwen38_qsa_select(const float *query, int query_heads,
            token_count - complete_blocks * (size_t)compress_ratio);
     return (int)(top_blocks * (size_t)compress_ratio +
                  token_count - complete_blocks * (size_t)compress_ratio);
+}
+
+int qwen38_qsa_select(const float *query, int query_heads,
+                      const float *raw_keys, size_t token_count, int head_dim,
+                      const float *key_norm_weight, float norm_eps,
+                      const float *rope_cos, const float *rope_sin,
+                      int rotary_dim, int compress_ratio, int token_budget,
+                      uint8_t *selected, float *pooled_key,
+                      Qwen38QsaEntry *heap, size_t heap_capacity) {
+    return select_impl(query, query_heads, raw_keys, token_count, head_dim,
+                       key_norm_weight, norm_eps, rope_cos, rope_sin,
+                       rotary_dim, 0.0f, 0, compress_ratio, token_budget,
+                       selected, pooled_key, heap, heap_capacity);
+}
+
+int qwen38_qsa_select_text(const float *query, int query_heads,
+                           const float *raw_keys, size_t token_count,
+                           int head_dim, const float *key_norm_weight,
+                           float norm_eps, int rotary_dim, float rope_theta,
+                           int compress_ratio, int token_budget,
+                           uint8_t *selected, float *pooled_key,
+                           Qwen38QsaEntry *heap, size_t heap_capacity) {
+    return select_impl(query, query_heads, raw_keys, token_count, head_dim,
+                       key_norm_weight, norm_eps, NULL, NULL, rotary_dim,
+                       rope_theta, 1, compress_ratio, token_budget,
+                       selected, pooled_key, heap, heap_capacity);
 }

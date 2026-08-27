@@ -33,6 +33,12 @@ int main(void) {
                              NULL, NULL, 0, 2, 8, selected,
                              pooled, heap, 2) == 5);
     for (int i = 0; i < 5; i++) assert(selected[i]);
+    float zero_keys[9 * 4] = {0};
+    assert(qwen38_qsa_select_text(query, 2, zero_keys, 9, 4, norm, 1e-6f,
+                                  4, 10000.0f, 2, 4, selected,
+                                  pooled, heap, 2) == 5);
+    const uint8_t text_expected[9] = {1, 1, 1, 1, 0, 0, 0, 0, 1};
+    for (int i = 0; i < 9; i++) assert(selected[i] == text_expected[i]);
     puts("qwen38 QSA: ok");
     return 0;
 }

@@ -1085,6 +1085,9 @@ tests/test_qwen38_mhc$(EXE): tests/test_qwen38_mhc.c qwen38_mhc.c qwen38_mhc.h
 tests/test_qwen38_qsa$(EXE): tests/test_qwen38_qsa.c qwen38_qsa.c qwen38_qsa.h
 	$(CC) $(CFLAGS) tests/test_qwen38_qsa.c qwen38_qsa.c -o $@ $(LDFLAGS)
 
+tests/test_qwen38_attention$(EXE): tests/test_qwen38_attention.c qwen38_attention.c qwen38_attention.h qwen38_qsa.c qwen38_qsa.h qwen38_config.h
+	$(CC) $(CFLAGS) tests/test_qwen38_attention.c qwen38_attention.c qwen38_qsa.c -o $@ $(LDFLAGS)
+
 tests/test_qwen38_ple_table$(EXE): tests/test_qwen38_ple_table.c qwen38_ple_table.c qwen38_ple_table.h st.h
 	$(CC) $(CFLAGS) tests/test_qwen38_ple_table.c qwen38_ple_table.c -o $@ $(LDFLAGS)
 
