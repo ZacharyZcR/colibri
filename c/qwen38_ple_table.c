@@ -68,10 +68,12 @@ int qwen38_ple_table_lookup(const Qwen38PleTable *table, const uint64_t *rows,
         if (table->dtype == 2) {
             memcpy(destination, source, (size_t)table->row_width * sizeof(float));
         } else {
-            const uint16_t *half = (const uint16_t *)source;
-            for (int column = 0; column < table->row_width; column++)
+            for (int column = 0; column < table->row_width; column++) {
+                uint16_t half;
+                memcpy(&half, source + (size_t)column * sizeof(half), sizeof(half));
                 destination[column] = table->dtype == 0 ?
-                    bf16_to_f32(half[column]) : f16_to_f32(half[column]);
+                    bf16_to_f32(half) : f16_to_f32(half);
+            }
         }
     }
     return 0;
