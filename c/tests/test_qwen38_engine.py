@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 import argparse
 import json
+import re
 import subprocess
 import unittest
 from pathlib import Path
@@ -29,4 +30,22 @@ error = max(abs(actual - expected)
             for actual, expected in zip(logits, reference["last_logits"]))
 assert error < 2e-5, error
 assert greedy == reference["greedy"], (greedy, reference["greedy"])
+
+summary = subprocess.run([
+    str(args.binary.resolve()), str((args.fixture / "source").resolve()),
+    "--experts", str((args.fixture / "experts").resolve()),
+    "--ids", ids, "--greedy", "2", "--summary", "--benchmark",
+], text=True, capture_output=True, check=True)
+summary_lines = summary.stdout.splitlines()
+assert summary_lines[0] == lines[0]
+assert summary_lines[1:] == lines[2:]
+match = re.fullmatch(
+    r"QWEN38_BENCH load_s=([0-9.]+) teacher_tokens=(\d+) "
+    r"teacher_s=([0-9.]+) teacher_tok_s=([0-9.]+) "
+    r"decode_tokens=(\d+) decode_s=([0-9.]+) decode_tok_s=([0-9.]+)",
+    summary.stderr.strip())
+assert match, summary.stderr
+assert int(match.group(2)) == len(reference["input_ids"])
+assert int(match.group(5)) == len(reference["greedy"])
+assert all(float(match.group(index)) >= 0.0 for index in (1, 3, 4, 6, 7))
 print(f"PASS Qwen3.8 engine: token-exact, max logit error {error:.3g}")

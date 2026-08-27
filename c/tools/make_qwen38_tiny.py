@@ -63,6 +63,8 @@ def add_hyper_moe(shapes):
             prefix + "block_inject_weight.weight": (2, 32),
         })
     shapes.update({
+        "mlp.experts.gate_up_proj": (8, 12, 16),
+        "mlp.experts.down_proj": (8, 16, 6),
         "mlp.gate.weight": (8, 16),
         "mlp.shared_expert.gate_proj.weight": (6, 16),
         "mlp.shared_expert.up_proj.weight": (6, 16),
@@ -108,6 +110,13 @@ def source_tensors():
     }
     for suffix, shape in ple.items():
         tensors["model.language_model.layers.1.ple." + suffix] = ("BF16", zero(shape))
+    ple_meta = "model.language_model.layers.1.ple.ple_embedding."
+    tensors[ple_meta + "layer_multipliers"] = (
+        "I64", np.zeros(2, dtype="<i8"))
+    tensors[ple_meta + "ngram_heads_vocab_sizes"] = (
+        "I64", np.zeros(2, dtype="<i8"))
+    tensors[ple_meta + "ngram_heads_offsets"] = (
+        "I64", np.zeros(2, dtype="<i8"))
     global_hyper = {
         "hc_norm.weight": (32,), "input_mix_weight_down.weight": (4, 32),
         "input_mix_weight_up.weight": (32, 4),
@@ -115,6 +124,30 @@ def source_tensors():
     for suffix, shape in global_hyper.items():
         tensors["model.language_model.hyper_connection_mixer." + suffix] = (
             "BF16", zero(shape))
+    mtp_global = {
+        "fc_embedding.weight": (16, 16), "fc_hidden.weight": (16, 16),
+        "pre_fc_norm_embedding.weight": (16,),
+        "pre_fc_norm_hidden.weight": (32,),
+        "hyper_connection_mixer.hc_norm.weight": (32,),
+        "hyper_connection_mixer.input_mix_weight_down.weight": (4, 32),
+        "hyper_connection_mixer.input_mix_weight_up.weight": (32, 4),
+    }
+    for suffix, shape in mtp_global.items():
+        tensors["mtp." + suffix] = ("BF16", zero(shape))
+    mtp_layer = {
+        "self_attn.q_proj.weight": (32, 16),
+        "self_attn.k_proj.weight": (8, 16),
+        "self_attn.v_proj.weight": (8, 16),
+        "self_attn.o_proj.weight": (16, 16),
+        "self_attn.q_norm.weight": (4,),
+        "self_attn.k_norm.weight": (4,),
+        "self_attn.indexer.index_qk_proj.weight": (12, 16),
+        "self_attn.indexer.q_layernorm.weight": (4,),
+        "self_attn.indexer.k_layernorm.weight": (4,),
+    }
+    add_hyper_moe(mtp_layer)
+    for suffix, shape in mtp_layer.items():
+        tensors["mtp.layers.0." + suffix] = ("BF16", zero(shape))
     return tensors
 
 
@@ -129,6 +162,7 @@ def config():
         "linear_value_head_dim": 4, "linear_conv_kernel_dim": 4,
         "hc_count": 2, "hc_lowrank": 4, "ngram_size": 2,
         "ngram_vocab_size_base": 100, "split_ngram_parts": 2,
+        "make_ngram_vocab_size_divisible_by": 4,
         "ple_conv_kernel_size": 3, "ple_embed_dim": 16,
         "heads_per_ngram": 2, "ple_layer_ids": [2], "indexer_budget": 8,
         "indexer_compress_ratio": 2, "indexer_head_dim": 4,

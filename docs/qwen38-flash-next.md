@@ -69,6 +69,23 @@ c/qwen38_flash_next /models/Qwen3.8-Flash-Next \
   --ids 1,2,3 --greedy 8
 ```
 
+For an official checkpoint acceptance run, use the maintainer gate. It checks
+all source tensor names, shapes and dtypes, opens the converted overlay, runs
+teacher and cached greedy decode, suppresses the full vocabulary dump, and
+prints a machine-readable timing line:
+
+```sh
+make -C c qwen38-full-check \
+  QWEN38_MODEL=/models/Qwen3.8-Flash-Next \
+  QWEN38_EXPERTS=/models/Qwen3.8-Flash-Next/qwen38_experts \
+  QWEN38_ACCEPT_IDS=1,2,3 QWEN38_ACCEPT_GREEDY=2
+```
+
+The result includes `QWEN38_BENCH load_s=... teacher_tok_s=...
+decode_tok_s=...`. Record the build flags, accelerator environment and hardware
+with that line; the gate deliberately does not turn one machine's output into
+a repository-wide performance claim.
+
 ## Correctness boundary
 
 `make -C c qwen38-tiny-check` generates a four-layer hybrid checkpoint and

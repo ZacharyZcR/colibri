@@ -1073,11 +1073,12 @@ qwen38_flash_next$(EXE): $(QWEN38_SRC) qwen38_runtime.h qwen38_model.h \
 		backend_cuda.h backend_metal.h $(CUDA_OBJ) $(METAL_OBJ)
 	$(CC) $(CFLAGS) $(QWEN38_SRC) $(CUDA_OBJ) $(METAL_OBJ) -o $@ $(LDFLAGS)
 
-.PHONY: qwen38-tiny-generate qwen38-tiny-check
+.PHONY: qwen38-tiny-generate qwen38-tiny-check qwen38-full-check
 qwen38-tiny-generate:
 	$(PYTHON) tools/make_qwen38_tiny.py --output ./qwen38_tiny
 
 qwen38-tiny-check: qwen38-tiny-generate qwen38_flash_next$(EXE)
+	$(PYTHON) tools/check_qwen38_checkpoint.py --model ./qwen38_tiny/source
 	$(CC) $(NOCUDA_CFLAGS) -I. tests/test_qwen38_cuda_dispatch.c \
 		-o ./tests/test_qwen38_cuda_dispatch$(EXE) -lm $(NOCUDA_LDFLAGS)
 	./tests/test_qwen38_cuda_dispatch$(EXE)
@@ -1092,6 +1093,20 @@ qwen38-tiny-check: qwen38-tiny-generate qwen38_flash_next$(EXE)
 	Q38_EXPERTS="$(CURDIR)/qwen38_tiny/experts" \
 		./tests/qwen38_segment_gate$(EXE) qwen38_flash_next \
 		"$(CURDIR)/qwen38_tiny/source" 0 2 4 8
+
+# Maintainer/hardware acceptance gate. The caller supplies an official source
+# checkpoint and converted expert overlay; no large fixture is downloaded by CI.
+QWEN38_ACCEPT_IDS ?= 1,2,3
+QWEN38_ACCEPT_GREEDY ?= 2
+qwen38-full-check: qwen38_flash_next$(EXE)
+	@test -n "$(QWEN38_MODEL)" || { echo "set QWEN38_MODEL" >&2; exit 2; }
+	@test -n "$(QWEN38_EXPERTS)" || { echo "set QWEN38_EXPERTS" >&2; exit 2; }
+	@test -d "$(QWEN38_MODEL)" || { echo "QWEN38_MODEL is not a directory" >&2; exit 2; }
+	@test -d "$(QWEN38_EXPERTS)" || { echo "QWEN38_EXPERTS is not a directory" >&2; exit 2; }
+	$(PYTHON) tools/check_qwen38_checkpoint.py --model "$(QWEN38_MODEL)"
+	./qwen38_flash_next$(EXE) "$(QWEN38_MODEL)" \
+		--experts "$(QWEN38_EXPERTS)" --ids "$(QWEN38_ACCEPT_IDS)" \
+		--greedy "$(QWEN38_ACCEPT_GREEDY)" --summary --benchmark
 
 # Context-size gates: KV layout, growth across requests, and the attention
 # capacity. Includes qwen36.c directly, so no model file is needed.

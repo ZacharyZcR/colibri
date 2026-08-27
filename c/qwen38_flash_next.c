@@ -8,6 +8,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <time.h>
 
 #include "qwen38_runtime.h"
 #include "tok.h"
@@ -21,9 +22,15 @@ typedef struct {
 
 static int usage(const char *program) {
     fprintf(stderr,
-        "usage: %s MODEL --experts DIR --ids 1,2,3 [--greedy N]\n",
+        "usage: %s MODEL --experts DIR --ids 1,2,3 [--greedy N] [--summary] [--benchmark]\n",
         program);
     return 2;
+}
+
+static double now_seconds(void) {
+    struct timespec value;
+    clock_gettime(CLOCK_MONOTONIC, &value);
+    return value.tv_sec + value.tv_nsec * 1e-9;
 }
 
 static int parse_nonnegative(const char *text, int *output) {
@@ -265,7 +272,7 @@ int main(int argc, char **argv) {
     }
     if (argc < 6) return usage(argv[0]);
     const char *model_dir = argv[1], *expert_dir = NULL, *id_text = NULL;
-    int greedy = 0;
+    int greedy = 0, summary = 0, benchmark = 0;
     for (int arg = 2; arg < argc; arg++) {
         if (!strcmp(argv[arg], "--experts") && arg + 1 < argc)
             expert_dir = argv[++arg];
@@ -273,7 +280,9 @@ int main(int argc, char **argv) {
             id_text = argv[++arg];
         else if (!strcmp(argv[arg], "--greedy") && arg + 1 < argc) {
             if (parse_nonnegative(argv[++arg], &greedy)) return usage(argv[0]);
-        } else return usage(argv[0]);
+        } else if (!strcmp(argv[arg], "--summary")) summary = 1;
+        else if (!strcmp(argv[arg], "--benchmark")) benchmark = 1;
+        else return usage(argv[0]);
     }
     if (!expert_dir || !id_text) return usage(argv[0]);
     int64_t *ids = NULL;
@@ -285,42 +294,64 @@ int main(int argc, char **argv) {
     }
     char error[512] = {0};
     Qwen38Runtime runtime;
+    double load_start = now_seconds();
     if (qwen38_runtime_open(&runtime, model_dir, expert_dir,
                             count + (size_t)greedy, error, sizeof(error))) {
         fprintf(stderr, "qwen38: %s\n", error);
         free(ids);
         return 1;
     }
+    double load_seconds = now_seconds() - load_start;
     int vocab = runtime.model.config.vocab_size;
     float *logits = malloc((size_t)vocab * sizeof(*logits));
-    if (!logits) {
-        fprintf(stderr, "qwen38: out of memory allocating logits\n");
+    int *predictions = malloc((count + (size_t)greedy) * sizeof(*predictions));
+    if (!logits || !predictions) {
+        fprintf(stderr, "qwen38: out of memory allocating diagnostic output\n");
+        free(logits); free(predictions);
         qwen38_runtime_close(&runtime);
         free(ids);
         return 1;
     }
-    printf("teacher");
+    double teacher_start = now_seconds();
     for (size_t index = 0; index < count; index++) {
         if (qwen38_runtime_step(&runtime, ids[index], logits, (size_t)vocab,
                                 error, sizeof(error))) goto failed;
-        printf(" %d", argmax(logits, vocab));
+        predictions[index] = argmax(logits, vocab);
     }
-    printf("\nlast_logits");
-    for (int token = 0; token < vocab; token++) printf(" %.9g", logits[token]);
+    double teacher_seconds = now_seconds() - teacher_start;
+    printf("teacher");
+    for (size_t index = 0; index < count; index++)
+        printf(" %d", predictions[index]);
     printf("\n");
+    if (!summary) {
+        printf("last_logits");
+        for (int token = 0; token < vocab; token++) printf(" %.9g", logits[token]);
+        printf("\n");
+    }
+    double decode_start = now_seconds();
     for (int step = 0; step < greedy; step++) {
         int token = argmax(logits, vocab);
-        printf("greedy %d\n", token);
+        predictions[count + (size_t)step] = token;
         if (qwen38_runtime_step(&runtime, token, logits, (size_t)vocab,
                                 error, sizeof(error))) goto failed;
     }
-    free(logits);
+    double decode_seconds = now_seconds() - decode_start;
+    for (int step = 0; step < greedy; step++)
+        printf("greedy %d\n", predictions[count + (size_t)step]);
+    if (benchmark)
+        fprintf(stderr,
+                "QWEN38_BENCH load_s=%.6f teacher_tokens=%zu teacher_s=%.6f teacher_tok_s=%.6f decode_tokens=%d decode_s=%.6f decode_tok_s=%.6f\n",
+                load_seconds, count, teacher_seconds,
+                teacher_seconds > 0.0 ? count / teacher_seconds : 0.0,
+                greedy, decode_seconds,
+                decode_seconds > 0.0 ? greedy / decode_seconds : 0.0);
+    free(logits); free(predictions);
     qwen38_runtime_close(&runtime);
     free(ids);
     return 0;
 failed:
     fprintf(stderr, "qwen38: %s\n", error);
-    free(logits);
+    free(logits); free(predictions);
     qwen38_runtime_close(&runtime);
     free(ids);
     return 1;
