@@ -1097,6 +1097,9 @@ tests/test_qwen38_expert$(EXE): tests/test_qwen38_expert.c qwen38_expert.c qwen3
 tests/test_qwen38_moe_layer$(EXE): tests/test_qwen38_moe_layer.c qwen38_moe_layer.c qwen38_moe_layer.h qwen38_expert.c qwen38_expert.h qwen38_mhc.c qwen38_mhc.h qwen38_model.h qwen38_config.h st.h
 	$(CC) $(CFLAGS) tests/test_qwen38_moe_layer.c qwen38_moe_layer.c qwen38_expert.c qwen38_mhc.c -o $@ $(LDFLAGS)
 
+tests/test_qwen38_delta$(EXE): tests/test_qwen38_delta.c qwen38_delta.c qwen38_delta.h qwen38_config.h
+	$(CC) $(CFLAGS) tests/test_qwen38_delta.c qwen38_delta.c -o $@ $(LDFLAGS)
+
 # Reproducible local timing evidence; intentionally not a noisy CI perf gate.
 tests/bench_qwen36_dense_batch$(EXE): tests/bench_qwen36_dense_batch.c qwen36.c qwen36_tier.h st.h json.h compat.h $(QWEN36_TIER_SRC) $(CUDA_OBJ)
 	$(CC) $(QWEN36_CFLAGS) $< $(QWEN36_TIER_SRC) $(CUDA_OBJ) -o $@ $(QWEN36_LDFLAGS)
