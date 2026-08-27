@@ -111,6 +111,33 @@ class DoctorTest(unittest.TestCase):
         self.assertIsNone(report["plan"])
         self.assertEqual(exit_code(report), 1)
 
+    def test_registered_family_without_runtime_skips_engine_and_gpu(self):
+        text = {
+            "model_type": "qwen4_exp_text", "num_hidden_layers": 4,
+            "hidden_size": 32, "num_attention_heads": 2,
+            "num_key_value_heads": 1, "head_dim": 8,
+            "num_experts": 4,
+            "layer_types": ["linear_attention"] * 3 + ["full_attention"],
+            "linear_num_key_heads": 1, "linear_key_head_dim": 8,
+            "linear_num_value_heads": 2, "linear_value_head_dim": 8,
+            "linear_conv_kernel_dim": 4,
+            "indexer_n_heads": 1, "indexer_kv_heads": 1,
+            "indexer_head_dim": 8, "hc_count": 2,
+            "ple_layer_ids": [2], "ple_embed_dim": 32,
+            "ple_conv_kernel_size": 4,
+        }
+        (self.model / "config.json").write_text(json.dumps({
+            "model_type": "qwen4_exp", "text_config": text,
+        }))
+        report = self.report(engine_path=self.root / "qwen38_flash_next")
+        checks = self.checks_by_id(report)
+
+        self.assertEqual(checks["engine.binary"]["status"], "skip")
+        self.assertIn("runtime is not implemented yet",
+                      checks["engine.binary"]["summary"])
+        self.assertEqual(checks["accelerator.gpu"]["status"], "skip")
+        self.assertIn("CPU text runtime", checks["accelerator.gpu"]["summary"])
+
     def test_non_executable_engine_and_excessive_ram_budget_fail(self):
         self.engine.chmod(0o644)
         report = self.report(ram_gb=40)
