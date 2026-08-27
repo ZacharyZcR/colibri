@@ -135,14 +135,21 @@ int qwen38_moe_forward(Qwen38Model *model, int row, const float *input,
     memset(output, 0, (size_t)hidden * sizeof(float));
     float *expert_output = workspace + 2 * model->config.moe_intermediate_size;
     for (int index = 0; index < selected; index++) {
-        Qwen38Expert expert;
-        if (qwen38_expert_load(model, row, expert_ids[index], &expert,
-                               error, error_size)) return -1;
-        int result = qwen38_expert_forward(&expert, &model->config, input,
-                                           expert_output, workspace,
-                                           2 * model->config.moe_intermediate_size);
-        qwen38_expert_close(&expert);
-        if (result) return fail(error, error_size, "expert forward failed");
+        if (!qwen38_accel_cached_expert(row, expert_ids[index], expert_output,
+                                       input)) {
+            Qwen38Expert expert;
+            if (qwen38_expert_load(model, row, expert_ids[index], &expert,
+                                   error, error_size)) return -1;
+            int result = qwen38_expert_forward(&expert, &model->config, input,
+                                               expert_output, workspace,
+                                               2 * model->config.moe_intermediate_size);
+            if (!result)
+                qwen38_accel_cache_store(row, expert_ids[index],
+                                         expert.matrices);
+            qwen38_expert_close(&expert);
+            if (result)
+                return fail(error, error_size, "expert forward failed");
+        }
         for (int column = 0; column < hidden; column++)
             output[column] += router_weights[index] * expert_output[column];
     }

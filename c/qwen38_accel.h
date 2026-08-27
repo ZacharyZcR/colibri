@@ -21,7 +21,8 @@ typedef struct {
     int unused;
 } Qwen38AccelTensor;
 
-int qwen38_accel_init(char *error, size_t error_size);
+int qwen38_accel_init(int rows, int experts, int hidden, int intermediate,
+                      char *error, size_t error_size);
 void qwen38_accel_shutdown(void);
 void qwen38_accel_tensor_close(Qwen38AccelTensor *tensor);
 
@@ -35,5 +36,11 @@ int qwen38_accel_expert(Qwen38AccelTensor tensors[3], float *output,
                         const int8_t *weights, const float *scales,
                         const float *input, int hidden, int intermediate,
                         int group);
+
+/* CUDA/HIP device-resident expert cache. Hits execute without a disk read. */
+int qwen38_accel_cached_expert(int row, int expert, float *output,
+                               const float *input);
+void qwen38_accel_cache_store(int row, int expert,
+                              Qwen38AccelTensor tensors[3]);
 
 #endif

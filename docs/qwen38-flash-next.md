@@ -33,8 +33,10 @@ capacity and defaults to 8192.
 CUDA, HIP and Metal builds can execute the routed expert matrices on the GPU.
 The default per-row overlay (`--group-size 0`) is required; grouped overlays
 remain correct but fall back to the CPU path. CUDA and HIP use the fused expert
-pipeline after uploading the three matrices, so each selected expert transfers
-its activation and result once. Metal uses the shared int8 matmul backend.
+pipeline and retain recently used experts in a device-resident LRU cache. A
+cache hit skips both the overlay read and weight upload. Metal uses the shared
+int8 matmul backend but keeps streaming because its zero-copy tensor handles
+depend on the lifetime of the host allocation.
 
 ```sh
 # NVIDIA on Linux
@@ -50,10 +52,14 @@ make -C c METAL=1 qwen38_flash_next
 COLI_METAL=1 c/qwen38_flash_next MODEL --experts EXPERTS --ids 1,2,3
 ```
 
+`Q38_GPU_EXPERT_GB` sets the CUDA/HIP cache budget per process. It defaults to
+`auto`, which reserves 1 GiB of reported free device memory for other runtime
+state; set it to `0` to disable residency. Shutdown telemetry reports cache
+hits, misses, uploads and evictions.
+
 This stage accelerates routed experts only. Dense projections, DeltaNet, QSA,
-mHC, PLE and the global mixer still execute on the CPU, and expert weights are
-streamed rather than retained in device memory. Full-model GPU residency and
-throughput claims therefore remain out of scope.
+mHC, PLE and the global mixer still execute on the CPU. Full-model GPU
+residency and throughput claims therefore remain out of scope.
 
 For a tokenizer-independent diagnostic, pass token IDs directly:
 
@@ -71,8 +77,9 @@ serve protocol, and the real Python gateway adapter. Its committed reference
 is reproducible with official Transformers 5.16.1 via
 `c/tools/make_qwen38_ref.py`. ASan/UBSan covers the same executable and gateway
 flow in development. Mock-backed CUDA/HIP and Metal gates prove accelerator
-selection, exact int8 dispatch, fused CUDA/HIP expert execution, and grouped
-overlay fallback without requiring CI runners with GPUs.
+selection, exact int8 dispatch, fused CUDA/HIP expert execution, LRU
+hit/eviction behavior, and grouped overlay fallback without requiring CI
+runners with GPUs.
 
 The engine-owned Segment adapter advertises the expanded mHC stream as its
 boundary state, opens only the requested layer range, keeps QSA, DeltaNet and

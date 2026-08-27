@@ -109,12 +109,14 @@ int qwen38_runtime_open(Qwen38Runtime *runtime, const char *source_dir,
     memset(runtime, 0, sizeof(*runtime));
     if (qwen38_model_open(&runtime->model, source_dir, expert_dir,
                           error, error_size)) return -1;
-    if (qwen38_accel_init(error, error_size)) {
+    Qwen38Config *config = &runtime->model.config;
+    if (qwen38_accel_init(config->num_hidden_layers + config->mtp_layers,
+                          config->num_experts, config->hidden_size,
+                          config->moe_intermediate_size, error, error_size)) {
         qwen38_model_close(&runtime->model);
         return -1;
     }
     runtime->accelerator_initialized = 1;
-    Qwen38Config *config = &runtime->model.config;
     int64_t embedding_shape[] = {config->vocab_size, config->hidden_size};
     runtime->embedding = load(&runtime->model,
         "model.language_model.embed_tokens.weight", 2, embedding_shape,

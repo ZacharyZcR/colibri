@@ -33,7 +33,7 @@ int coli_metal_matmul(ColiMetalTensor **tensor, float *output,
 int main(void) {
     setenv("COLI_METAL", "1", 1);
     char error[128] = {0};
-    if (qwen38_accel_init(error, sizeof(error))) return 1;
+    if (qwen38_accel_init(2, 4, 2, 2, error, sizeof(error))) return 1;
     int8_t weights[] = {1, 2, 3, -2, 1, 4};
     float scales[] = {0.5f, 0.25f}, input[] = {2, -1, 3}, output[2];
     Qwen38AccelTensor tensor = {0};
