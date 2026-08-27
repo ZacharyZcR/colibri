@@ -5,6 +5,7 @@
 #include "../qwen38_delta_layer.h"
 #include "../qwen38_linear_layer.h"
 #include "../qwen38_ple_layer.h"
+#include "../qwen38_full_layer.h"
 
 #include <assert.h>
 #include <stdarg.h>
@@ -159,6 +160,33 @@ static void source_fixture(const char *directory) {
     for (size_t index = 0; index < sizeof(ple) / sizeof(ple[0]); index++)
         add_tensor(&header, &first, ple[index].name, "BF16", ple[index].shape,
                    &offset, ple[index].count * 2);
+    const struct { const char *name, *shape; size_t count; } full[] = {
+        {"model.language_model.layers.3.self_attn.q_proj.weight", "[32,16]", 32 * 16},
+        {"model.language_model.layers.3.self_attn.k_proj.weight", "[8,16]", 8 * 16},
+        {"model.language_model.layers.3.self_attn.v_proj.weight", "[8,16]", 8 * 16},
+        {"model.language_model.layers.3.self_attn.o_proj.weight", "[16,16]", 16 * 16},
+        {"model.language_model.layers.3.self_attn.q_norm.weight", "[4]", 4},
+        {"model.language_model.layers.3.self_attn.k_norm.weight", "[4]", 4},
+        {"model.language_model.layers.3.self_attn.indexer.index_qk_proj.weight", "[12,16]", 12 * 16},
+        {"model.language_model.layers.3.self_attn.indexer.q_layernorm.weight", "[4]", 4},
+        {"model.language_model.layers.3.self_attn.indexer.k_layernorm.weight", "[4]", 4},
+        {"model.language_model.layers.3.attn_hyper_connection.hc_norm.weight", "[32]", 32},
+        {"model.language_model.layers.3.attn_hyper_connection.input_mix_weight_down.weight", "[4,32]", 4 * 32},
+        {"model.language_model.layers.3.attn_hyper_connection.input_mix_weight_up.weight", "[32,4]", 32 * 4},
+        {"model.language_model.layers.3.attn_hyper_connection.block_inject_weight.weight", "[2,32]", 2 * 32},
+        {"model.language_model.layers.3.mlp_hyper_connection.hc_norm.weight", "[32]", 32},
+        {"model.language_model.layers.3.mlp_hyper_connection.input_mix_weight_down.weight", "[4,32]", 4 * 32},
+        {"model.language_model.layers.3.mlp_hyper_connection.input_mix_weight_up.weight", "[32,4]", 32 * 4},
+        {"model.language_model.layers.3.mlp_hyper_connection.block_inject_weight.weight", "[2,32]", 2 * 32},
+        {"model.language_model.layers.3.mlp.gate.weight", "[8,16]", 8 * 16},
+        {"model.language_model.layers.3.mlp.shared_expert.gate_proj.weight", "[6,16]", 6 * 16},
+        {"model.language_model.layers.3.mlp.shared_expert.up_proj.weight", "[6,16]", 6 * 16},
+        {"model.language_model.layers.3.mlp.shared_expert.down_proj.weight", "[16,6]", 16 * 6},
+        {"model.language_model.layers.3.mlp.shared_expert_gate.weight", "[1,16]", 16},
+    };
+    for (size_t index = 0; index < sizeof(full) / sizeof(full[0]); index++)
+        add_tensor(&header, &first, full[index].name, "BF16", full[index].shape,
+                   &offset, full[index].count * 2);
     write_safetensors(directory, &header, offset);
     free(header.text);
 }
@@ -205,7 +233,7 @@ int main(void) {
     char error[256] = {0};
     assert(qwen38_model_open(&model, source, overlay, error, sizeof(error)) == 0);
     assert(model.expert_bits == 4 && model.expert_group_size == 0);
-    assert(model.source.n == 32 && model.experts.n == 80);
+    assert(model.source.n == 54 && model.experts.n == 80);
     assert(model.ple[0].row_offsets[2] == 204);
     Qwen38Expert expert;
     assert(qwen38_expert_load(&model, 4, 7, &expert, error, sizeof(error)) == 0);
@@ -268,6 +296,21 @@ int main(void) {
     for (int index = 0; index < 32; index++) assert(hyper_output[index] == hyper_input[index]);
     free(ple_workspace);
     qwen38_ple_layer_close(&ple_layer);
+    Qwen38FullLayer full_layer;
+    assert(qwen38_full_layer_load(&model, 3, 2, &full_layer,
+                                  error, sizeof(error)) == 0);
+    size_t full_workspace_size = qwen38_full_layer_workspace_floats(&model.config);
+    float *full_workspace = malloc(full_workspace_size * sizeof(float));
+    assert(full_workspace);
+    for (int step = 0; step < 2; step++) {
+        assert(qwen38_full_layer_step(&model, 3, &full_layer, 7 + step,
+                                      hyper_input, hyper_output, full_workspace,
+                                      full_workspace_size, error, sizeof(error)) == 0);
+        for (int index = 0; index < 32; index++) assert(hyper_output[index] == hyper_input[index]);
+    }
+    assert(full_layer.state.length == 2);
+    free(full_workspace);
+    qwen38_full_layer_close(&full_layer);
     uint64_t row = 3; float result[16];
     assert(qwen38_ple_table_lookup(&model.ple[0], &row, 1, result, 16) == 0);
     for (int index = 0; index < 16; index++) assert(result[index] == 0.0f);
