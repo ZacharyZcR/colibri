@@ -120,11 +120,32 @@ int qwen38_config_parse(const char *json, Qwen38Config *config,
         config->layer_is_full[layer] = !strcmp(kind->str, "full_attention");
         config->full_attention_layers += config->layer_is_full[layer];
     }
+    jval *ple_layers = json_get(text, "ple_layer_ids");
+    if (!ple_layers || ple_layers->t != J_ARR || ple_layers->len < 1 ||
+        ple_layers->len > QWEN38_MAX_PLE_LAYERS) {
+        fail(error, error_size, "invalid ple_layer_ids");
+        goto done;
+    }
+    config->ple_layer_count = ple_layers->len;
+    for (int index = 0; index < ple_layers->len; index++) {
+        jval *value = ple_layers->kids[index];
+        if (!value || value->t != J_NUM || value->num < 1 ||
+            value->num > config->num_hidden_layers || value->num != (int)value->num) {
+            fail(error, error_size, "invalid ple_layer_ids[%d]", index);
+            goto done;
+        }
+        config->ple_layers[index] = (int)value->num;
+        for (int previous = 0; previous < index; previous++)
+            if (config->ple_layers[previous] == config->ple_layers[index]) {
+                fail(error, error_size, "duplicate ple_layer_ids[%d]", index);
+                goto done;
+            }
+    }
     if (config->experts_per_token > config->num_experts ||
         config->attention_heads % config->kv_heads ||
         config->linear_value_heads % config->linear_key_heads ||
         config->ple_embed_dim != config->hidden_size ||
-        config->heads_per_ngram * config->ngram_size > config->attention_heads ||
+        config->heads_per_ngram * config->ngram_size != config->attention_heads ||
         config->linear_conv_kernel < 2 || config->ple_conv_kernel < 2 ||
         !config->full_attention_layers) {
         fail(error, error_size, "inconsistent Qwen3.8 geometry");

@@ -1,0 +1,172 @@
+#define _GNU_SOURCE
+#include "../qwen38_model.h"
+
+#include <assert.h>
+#include <stdarg.h>
+#include <stdint.h>
+#include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
+
+typedef struct {
+    char *text;
+    size_t length, capacity;
+} Buffer;
+
+static void append(Buffer *buffer, const char *format, ...) {
+    for (;;) {
+        if (buffer->capacity - buffer->length < 256) {
+            buffer->capacity = buffer->capacity ? buffer->capacity * 2 : 4096;
+            buffer->text = realloc(buffer->text, buffer->capacity);
+            assert(buffer->text);
+        }
+        va_list args;
+        va_start(args, format);
+        int written = vsnprintf(buffer->text + buffer->length,
+                                buffer->capacity - buffer->length, format, args);
+        va_end(args);
+        assert(written >= 0);
+        if ((size_t)written < buffer->capacity - buffer->length) {
+            buffer->length += (size_t)written;
+            return;
+        }
+        buffer->capacity = buffer->length + (size_t)written + 1;
+        buffer->text = realloc(buffer->text, buffer->capacity);
+        assert(buffer->text);
+    }
+}
+
+static void write_text(const char *directory, const char *name, const char *text) {
+    char path[512];
+    snprintf(path, sizeof(path), "%s/%s", directory, name);
+    FILE *file = fopen(path, "wb"); assert(file);
+    assert(fwrite(text, 1, strlen(text), file) == strlen(text));
+    assert(fclose(file) == 0);
+}
+
+static void write_safetensors(const char *directory, Buffer *header,
+                              size_t data_size) {
+    append(header, "}");
+    char path[512];
+    snprintf(path, sizeof(path), "%s/model.safetensors", directory);
+    FILE *file = fopen(path, "wb"); assert(file);
+    uint64_t header_size = header->length;
+    assert(fwrite(&header_size, 8, 1, file) == 1);
+    assert(fwrite(header->text, 1, header->length, file) == header->length);
+    unsigned char zero[1024] = {0};
+    while (data_size) {
+        size_t chunk = data_size < sizeof(zero) ? data_size : sizeof(zero);
+        assert(fwrite(zero, 1, chunk, file) == chunk);
+        data_size -= chunk;
+    }
+    assert(fclose(file) == 0);
+}
+
+static void add_tensor(Buffer *header, int *first, const char *name,
+                       const char *dtype, const char *shape,
+                       size_t *offset, size_t bytes) {
+    append(header, "%s\"%s\":{\"dtype\":\"%s\",\"shape\":%s,"
+                   "\"data_offsets\":[%zu,%zu]}",
+           *first ? "" : ",", name, dtype, shape, *offset, *offset + bytes);
+    *first = 0;
+    *offset += bytes;
+}
+
+static void source_fixture(const char *directory) {
+    const char *config =
+        "{\"model_type\":\"qwen4_exp\",\"text_config\":{"
+        "\"model_type\":\"qwen4_exp_text\",\"hidden_size\":16,"
+        "\"num_hidden_layers\":4,\"vocab_size\":32,\"num_experts\":8,"
+        "\"num_experts_per_tok\":2,\"moe_intermediate_size\":6,"
+        "\"shared_expert_intermediate_size\":6,\"num_attention_heads\":4,"
+        "\"num_key_value_heads\":2,\"head_dim\":4,\"linear_num_key_heads\":2,"
+        "\"linear_key_head_dim\":4,\"linear_num_value_heads\":4,"
+        "\"linear_value_head_dim\":4,\"linear_conv_kernel_dim\":4,"
+        "\"hc_count\":2,\"hc_lowrank\":4,\"ngram_size\":2,"
+        "\"ngram_vocab_size_base\":100,\"split_ngram_parts\":2,"
+        "\"ple_conv_kernel_size\":3,\"ple_embed_dim\":16,"
+        "\"heads_per_ngram\":2,\"ple_layer_ids\":[2],"
+        "\"indexer_budget\":8,\"indexer_compress_ratio\":2,"
+        "\"indexer_head_dim\":4,\"indexer_kv_heads\":1,\"indexer_n_heads\":2,"
+        "\"mtp_num_hidden_layers\":1,\"rms_norm_eps\":0.000001,"
+        "\"partial_rotary_factor\":0.5,"
+        "\"rope_parameters\":{\"rope_theta\":10000},"
+        "\"layer_types\":[\"linear_attention\",\"linear_attention\","
+        "\"linear_attention\",\"full_attention\"]}}";
+    write_text(directory, "config.json", config);
+    Buffer header = {0}; append(&header, "{");
+    int first = 1; size_t offset = 0;
+    add_tensor(&header, &first, "model.language_model.embed_tokens.weight",
+               "BF16", "[32,16]", &offset, 32 * 16 * 2);
+    add_tensor(&header, &first, "lm_head.weight", "BF16", "[32,16]",
+               &offset, 32 * 16 * 2);
+    for (int shard = 0; shard < 2; shard++) {
+        char name[256];
+        snprintf(name, sizeof(name), "model.language_model.layers.1.ple."
+                 "ple_embedding.ngram_embedding.shard_%d.weight", shard);
+        add_tensor(&header, &first, name, "BF16", "[2,16]", &offset, 2 * 16 * 2);
+    }
+    write_safetensors(directory, &header, offset);
+    free(header.text);
+}
+
+static void overlay_fixture(const char *directory) {
+    write_text(directory, "qwen38_expert_meta.json",
+        "{\"family\":\"qwen38_flash_next\",\"rows\":5,"
+        "\"experts_per_row\":8,\"expert_bits\":4,\"group_size\":0}");
+    Buffer header = {0}; append(&header, "{");
+    int first = 1; size_t offset = 0;
+    for (int row = 0; row < 5; row++) for (int expert = 0; expert < 8; expert++) {
+        char name[256];
+        snprintf(name, sizeof(name),
+                 "model.layers.%d.mlp.experts.%d.merged_weight", row, expert);
+        add_tensor(&header, &first, name, "U8", "[144]", &offset, 144);
+        snprintf(name, sizeof(name), "model.layers.%d.mlp.experts.%d.qs", row, expert);
+        add_tensor(&header, &first, name, "F32", "[28]", &offset, 28 * 4);
+    }
+    write_safetensors(directory, &header, offset);
+    free(header.text);
+}
+
+static void cleanup(const char *directory, int source) {
+    char path[512];
+    snprintf(path, sizeof(path), "%s/model.safetensors", directory);
+    assert(remove(path) == 0);
+    snprintf(path, sizeof(path), "%s/%s", directory,
+             source ? "config.json" : "qwen38_expert_meta.json");
+    assert(remove(path) == 0);
+#ifdef _WIN32
+    assert(_rmdir(directory) == 0);
+#else
+    assert(rmdir(directory) == 0);
+#endif
+}
+
+int main(void) {
+    char source[] = "test_qwen38_source_XXXXXX";
+    char overlay[] = "test_qwen38_overlay_XXXXXX";
+    assert(mkdtemp(source) && mkdtemp(overlay));
+    source_fixture(source);
+    overlay_fixture(overlay);
+    Qwen38Model model;
+    char error[256] = {0};
+    assert(qwen38_model_open(&model, source, overlay, error, sizeof(error)) == 0);
+    assert(model.expert_bits == 4 && model.expert_group_size == 0);
+    assert(model.source.n == 4 && model.experts.n == 80);
+    assert(model.ple[0].row_offsets[2] == 4);
+    uint64_t row = 3; float result[16];
+    assert(qwen38_ple_table_lookup(&model.ple[0], &row, 1, result, 16) == 0);
+    for (int index = 0; index < 16; index++) assert(result[index] == 0.0f);
+    qwen38_model_close(&model);
+    assert(model.source.n == 0 && model.experts.n == 0);
+    write_text(overlay, "qwen38_expert_meta.json",
+        "{\"family\":\"qwen38_flash_next\",\"rows\":4,"
+        "\"experts_per_row\":8,\"expert_bits\":4,\"group_size\":0}");
+    assert(qwen38_model_open(&model, source, overlay, error, sizeof(error)) == -1);
+    assert(strstr(error, "metadata does not match"));
+    assert(model.source.n == 0 && model.experts.n == 0);
+    cleanup(source, 1);
+    cleanup(overlay, 0);
+    puts("qwen38 model loader: ok");
+    return 0;
+}

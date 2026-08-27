@@ -20,6 +20,7 @@ static const char *config_json =
     "\"indexer_head_dim\":4,\"indexer_kv_heads\":1,\"indexer_n_heads\":2,"
     "\"mtp_num_hidden_layers\":1,\"rms_norm_eps\":0.000001,"
     "\"partial_rotary_factor\":0.5,"
+    "\"ple_layer_ids\":[2],"
     "\"rope_parameters\":{\"rope_theta\":10000},"
     "\"layer_types\":[\"linear_attention\",\"linear_attention\","
     "\"linear_attention\",\"full_attention\"]}}";
@@ -38,6 +39,7 @@ int main(int argc, char **argv) {
     assert(config.hidden_size == 16 && config.num_hidden_layers == 4);
     assert(config.full_attention_layers == 1 && config.layer_is_full[3]);
     assert(config.mtp_layers == 1 && config.ngram_parts == 2);
+    assert(config.ple_layer_count == 1 && config.ple_layers[0] == 2);
 
     char broken[4096];
     snprintf(broken, sizeof(broken), "%s", config_json);
