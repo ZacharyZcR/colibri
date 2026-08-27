@@ -12,4 +12,8 @@ int qwen38_mhc_mix(const float *hyper_input, int hc_count, int hidden_size,
                    float *injection_weights, float *workspace,
                    size_t workspace_floats);
 
+int qwen38_mhc_inject(const float *hyper_input, const float *block_output,
+                      const float *injection_weights, int hc_count,
+                      int hidden_size, float *output);
+
 #endif

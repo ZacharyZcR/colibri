@@ -1,6 +1,7 @@
 #define _GNU_SOURCE
 #include "../qwen38_model.h"
 #include "../qwen38_expert.h"
+#include "../qwen38_moe_layer.h"
 
 #include <assert.h>
 #include <stdarg.h>
@@ -107,6 +108,20 @@ static void source_fixture(const char *directory) {
                  "ple_embedding.ngram_embedding.shard_%d.weight", shard);
         add_tensor(&header, &first, name, "BF16", "[2,16]", &offset, 2 * 16 * 2);
     }
+    const struct { const char *name, *shape; size_t count; } dense[] = {
+        {"model.language_model.layers.0.mlp_hyper_connection.hc_norm.weight", "[32]", 32},
+        {"model.language_model.layers.0.mlp_hyper_connection.input_mix_weight_down.weight", "[4,32]", 4 * 32},
+        {"model.language_model.layers.0.mlp_hyper_connection.input_mix_weight_up.weight", "[32,4]", 32 * 4},
+        {"model.language_model.layers.0.mlp_hyper_connection.block_inject_weight.weight", "[2,32]", 2 * 32},
+        {"model.language_model.layers.0.mlp.gate.weight", "[8,16]", 8 * 16},
+        {"model.language_model.layers.0.mlp.shared_expert.gate_proj.weight", "[6,16]", 6 * 16},
+        {"model.language_model.layers.0.mlp.shared_expert.up_proj.weight", "[6,16]", 6 * 16},
+        {"model.language_model.layers.0.mlp.shared_expert.down_proj.weight", "[16,6]", 16 * 6},
+        {"model.language_model.layers.0.mlp.shared_expert_gate.weight", "[1,16]", 16},
+    };
+    for (size_t index = 0; index < sizeof(dense) / sizeof(dense[0]); index++)
+        add_tensor(&header, &first, dense[index].name, "BF16", dense[index].shape,
+                   &offset, dense[index].count * 2);
     write_safetensors(directory, &header, offset);
     free(header.text);
 }
@@ -153,7 +168,7 @@ int main(void) {
     char error[256] = {0};
     assert(qwen38_model_open(&model, source, overlay, error, sizeof(error)) == 0);
     assert(model.expert_bits == 4 && model.expert_group_size == 0);
-    assert(model.source.n == 4 && model.experts.n == 80);
+    assert(model.source.n == 13 && model.experts.n == 80);
     assert(model.ple[0].row_offsets[2] == 4);
     Qwen38Expert expert;
     assert(qwen38_expert_load(&model, 4, 7, &expert, error, sizeof(error)) == 0);
@@ -167,6 +182,19 @@ int main(void) {
                               moe_output, moe_workspace, 28,
                               error, sizeof(error)) == 0);
     for (int index = 0; index < 16; index++) assert(moe_output[index] == 0.0f);
+    Qwen38MoeLayer layer;
+    assert(qwen38_moe_layer_load(&model, 0, &layer, error, sizeof(error)) == 0);
+    float hyper_input[32], hyper_output[32];
+    for (int index = 0; index < 32; index++) hyper_input[index] = index + 1.0f;
+    size_t layer_workspace_size = qwen38_moe_layer_workspace_floats(&model.config);
+    float *layer_workspace = malloc(layer_workspace_size * sizeof(float));
+    assert(layer_workspace);
+    assert(qwen38_moe_layer_forward(&model, 0, &layer, hyper_input, hyper_output,
+                                    layer_workspace, layer_workspace_size,
+                                    error, sizeof(error)) == 0);
+    for (int index = 0; index < 32; index++) assert(hyper_output[index] == hyper_input[index]);
+    free(layer_workspace);
+    qwen38_moe_layer_close(&layer);
     uint64_t row = 3; float result[16];
     assert(qwen38_ple_table_lookup(&model.ple[0], &row, 1, result, 16) == 0);
     for (int index = 0; index < 16; index++) assert(result[index] == 0.0f);

@@ -78,3 +78,17 @@ int qwen38_mhc_mix(const float *hyper_input, int hc_count, int hidden_size,
     }
     return 0;
 }
+
+int qwen38_mhc_inject(const float *hyper_input, const float *block_output,
+                      const float *injection_weights, int hc_count,
+                      int hidden_size, float *output) {
+    if (!hyper_input || !block_output || !injection_weights || !output ||
+        hc_count < 1 || hidden_size < 1) return -1;
+    for (int stream = 0; stream < hc_count; stream++)
+        for (int dim = 0; dim < hidden_size; dim++) {
+            size_t index = (size_t)stream * hidden_size + dim;
+            output[index] = hyper_input[index] +
+                            block_output[dim] * injection_weights[stream];
+        }
+    return 0;
+}
