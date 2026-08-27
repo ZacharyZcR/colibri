@@ -1062,21 +1062,28 @@ endif
 qwen36$(EXE): qwen36.c qwen36_tier.h st.h json.h compat.h $(QWEN36_TIER_SRC) $(CUDA_OBJ)
 	$(CC) $(QWEN36_CFLAGS) qwen36.c $(QWEN36_TIER_SRC) $(CUDA_OBJ) -o qwen36$(EXE) $(QWEN36_LDFLAGS)
 
-QWEN38_SRC = qwen38_flash_next.c qwen38_runtime.c qwen38_model.c \
+QWEN38_SRC = qwen38_flash_next.c qwen38_runtime.c qwen38_model.c qwen38_accel.c \
 	qwen38_expert.c qwen38_moe_layer.c qwen38_mhc.c qwen38_delta_layer.c \
 	qwen38_delta.c qwen38_linear_layer.c qwen38_full_layer.c \
 	qwen38_attention.c qwen38_qsa.c qwen38_ple_layer.c qwen38_ple_hash.c \
 	qwen38_config.c qwen38_ple_table.c
 
 qwen38_flash_next$(EXE): $(QWEN38_SRC) qwen38_runtime.h qwen38_model.h \
-		qwen38_config.h st.h json.h tok.h tok_unicode.h tok_unicode_o200k.h
-	$(CC) $(CFLAGS) $(QWEN38_SRC) -o $@ $(LDFLAGS)
+		qwen38_config.h qwen38_accel.h st.h json.h tok.h tok_unicode.h tok_unicode_o200k.h \
+		backend_cuda.h backend_metal.h $(CUDA_OBJ) $(METAL_OBJ)
+	$(CC) $(CFLAGS) $(QWEN38_SRC) $(CUDA_OBJ) $(METAL_OBJ) -o $@ $(LDFLAGS)
 
 .PHONY: qwen38-tiny-generate qwen38-tiny-check
 qwen38-tiny-generate:
 	$(PYTHON) tools/make_qwen38_tiny.py --output ./qwen38_tiny
 
 qwen38-tiny-check: qwen38-tiny-generate qwen38_flash_next$(EXE)
+	$(CC) $(NOCUDA_CFLAGS) -I. tests/test_qwen38_cuda_dispatch.c \
+		-o ./tests/test_qwen38_cuda_dispatch$(EXE) -lm $(NOCUDA_LDFLAGS)
+	./tests/test_qwen38_cuda_dispatch$(EXE)
+	$(CC) $(NOCUDA_CFLAGS) -I. tests/test_qwen38_metal_dispatch.c \
+		-o ./tests/test_qwen38_metal_dispatch$(EXE) -lm $(NOCUDA_LDFLAGS)
+	./tests/test_qwen38_metal_dispatch$(EXE)
 	$(PYTHON) tests/test_qwen38_engine.py --binary ./qwen38_flash_next$(EXE) \
 		--fixture ./qwen38_tiny
 	$(PYTHON) tests/test_qwen38_serve.py --binary ./qwen38_flash_next$(EXE) \
@@ -1118,14 +1125,14 @@ tests/test_qwen38_ple_table$(EXE): tests/test_qwen38_ple_table.c qwen38_ple_tabl
 tests/test_qwen38_ple_layer$(EXE): tests/test_qwen38_ple_layer.c qwen38_ple_layer.c qwen38_ple_layer.h qwen38_ple_hash.c qwen38_ple_hash.h qwen38_ple_table.c qwen38_ple_table.h qwen38_model.h qwen38_config.h st.h
 	$(CC) $(CFLAGS) tests/test_qwen38_ple_layer.c qwen38_ple_layer.c qwen38_ple_hash.c qwen38_ple_table.c -o $@ $(LDFLAGS)
 
-tests/test_qwen38_model$(EXE): tests/test_qwen38_model.c qwen38_runtime.c qwen38_runtime.h qwen38_model.c qwen38_model.h qwen38_expert.c qwen38_expert.h qwen38_moe_layer.c qwen38_moe_layer.h qwen38_mhc.c qwen38_mhc.h qwen38_delta_layer.c qwen38_delta_layer.h qwen38_delta.c qwen38_delta.h qwen38_linear_layer.c qwen38_linear_layer.h qwen38_full_layer.c qwen38_full_layer.h qwen38_attention.c qwen38_attention.h qwen38_qsa.c qwen38_qsa.h qwen38_ple_layer.c qwen38_ple_layer.h qwen38_ple_hash.c qwen38_ple_hash.h qwen38_config.c qwen38_config.h qwen38_ple_table.c qwen38_ple_table.h st.h json.h
-	$(CC) $(CFLAGS) tests/test_qwen38_model.c qwen38_runtime.c qwen38_model.c qwen38_expert.c qwen38_moe_layer.c qwen38_mhc.c qwen38_delta_layer.c qwen38_delta.c qwen38_linear_layer.c qwen38_full_layer.c qwen38_attention.c qwen38_qsa.c qwen38_ple_layer.c qwen38_ple_hash.c qwen38_config.c qwen38_ple_table.c -o $@ $(LDFLAGS)
+tests/test_qwen38_model$(EXE): tests/test_qwen38_model.c qwen38_runtime.c qwen38_runtime.h qwen38_model.c qwen38_model.h qwen38_accel.c qwen38_accel.h qwen38_expert.c qwen38_expert.h qwen38_moe_layer.c qwen38_moe_layer.h qwen38_mhc.c qwen38_mhc.h qwen38_delta_layer.c qwen38_delta_layer.h qwen38_delta.c qwen38_delta.h qwen38_linear_layer.c qwen38_linear_layer.h qwen38_full_layer.c qwen38_full_layer.h qwen38_attention.c qwen38_attention.h qwen38_qsa.c qwen38_qsa.h qwen38_ple_layer.c qwen38_ple_layer.h qwen38_ple_hash.c qwen38_ple_hash.h qwen38_config.c qwen38_config.h qwen38_ple_table.c qwen38_ple_table.h st.h json.h
+	$(CC) $(CFLAGS) tests/test_qwen38_model.c qwen38_runtime.c qwen38_model.c qwen38_accel.c qwen38_expert.c qwen38_moe_layer.c qwen38_mhc.c qwen38_delta_layer.c qwen38_delta.c qwen38_linear_layer.c qwen38_full_layer.c qwen38_attention.c qwen38_qsa.c qwen38_ple_layer.c qwen38_ple_hash.c qwen38_config.c qwen38_ple_table.c -o $@ $(LDFLAGS)
 
-tests/test_qwen38_expert$(EXE): tests/test_qwen38_expert.c qwen38_expert.c qwen38_expert.h qwen38_model.h qwen38_config.h st.h
-	$(CC) $(CFLAGS) tests/test_qwen38_expert.c qwen38_expert.c -o $@ $(LDFLAGS)
+tests/test_qwen38_expert$(EXE): tests/test_qwen38_expert.c qwen38_expert.c qwen38_expert.h qwen38_accel.c qwen38_accel.h qwen38_model.h qwen38_config.h st.h
+	$(CC) $(CFLAGS) tests/test_qwen38_expert.c qwen38_expert.c qwen38_accel.c -o $@ $(LDFLAGS)
 
-tests/test_qwen38_moe_layer$(EXE): tests/test_qwen38_moe_layer.c qwen38_moe_layer.c qwen38_moe_layer.h qwen38_expert.c qwen38_expert.h qwen38_mhc.c qwen38_mhc.h qwen38_model.h qwen38_config.h st.h
-	$(CC) $(CFLAGS) tests/test_qwen38_moe_layer.c qwen38_moe_layer.c qwen38_expert.c qwen38_mhc.c -o $@ $(LDFLAGS)
+tests/test_qwen38_moe_layer$(EXE): tests/test_qwen38_moe_layer.c qwen38_moe_layer.c qwen38_moe_layer.h qwen38_expert.c qwen38_expert.h qwen38_accel.c qwen38_accel.h qwen38_mhc.c qwen38_mhc.h qwen38_model.h qwen38_config.h st.h
+	$(CC) $(CFLAGS) tests/test_qwen38_moe_layer.c qwen38_moe_layer.c qwen38_expert.c qwen38_accel.c qwen38_mhc.c -o $@ $(LDFLAGS)
 
 tests/test_qwen38_delta$(EXE): tests/test_qwen38_delta.c qwen38_delta.c qwen38_delta.h qwen38_config.h
 	$(CC) $(CFLAGS) tests/test_qwen38_delta.c qwen38_delta.c -o $@ $(LDFLAGS)
@@ -1413,7 +1420,7 @@ SEGMENT_ENGINE_OBJS = \
 	$(SEGMENT_BUILD_DIR)/olmoe.o \
 	$(SEGMENT_BUILD_DIR)/qwen36.o \
 	$(SEGMENT_BUILD_DIR)/qwen38_segment.o
-SEGMENT_QWEN38_NAMES = qwen38_model qwen38_expert qwen38_moe_layer qwen38_mhc \
+SEGMENT_QWEN38_NAMES = qwen38_model qwen38_accel qwen38_expert qwen38_moe_layer qwen38_mhc \
 	qwen38_delta_layer qwen38_delta qwen38_linear_layer qwen38_full_layer \
 	qwen38_attention qwen38_qsa qwen38_ple_layer qwen38_ple_hash \
 	qwen38_config qwen38_ple_table

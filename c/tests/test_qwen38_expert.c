@@ -20,7 +20,7 @@ int main(void) {
         1, 0, 0, 1,
     };
     float scales[] = {1, 1, 1, 1, 1, 1};
-    Qwen38Expert expert = {weights, scales};
+    Qwen38Expert expert = {.weights = weights, .scales = scales};
     float input[] = {1, 2};
     float output[2], workspace[4];
     assert(qwen38_expert_forward(&expert, &config, input, output,

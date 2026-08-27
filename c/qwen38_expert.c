@@ -29,6 +29,8 @@ static int64_t scale_count(const Qwen38Config *config, int group) {
 
 void qwen38_expert_close(Qwen38Expert *expert) {
     if (!expert) return;
+    for (int index = 0; index < 3; index++)
+        qwen38_accel_tensor_close(&expert->matrices[index]);
     free(expert->weights);
     free(expert->scales);
     memset(expert, 0, sizeof(*expert));
@@ -73,9 +75,12 @@ int qwen38_expert_load(Qwen38Model *model, int row, int expert,
     return 0;
 }
 
-static void matvec_q(const int8_t *weights, const float *scales,
+static void matvec_q(Qwen38AccelTensor *accel, const int8_t *weights,
+                     const float *scales,
                      int rows, int columns, int group, const float *input,
                      float *output) {
+    if (qwen38_accel_matvec(accel, output, weights, scales, input,
+                            rows, columns, group)) return;
     int groups = group ? (columns + group - 1) / group : 1;
     int width = group ? group : columns;
     for (int row = 0; row < rows; row++) {
@@ -87,7 +92,7 @@ static void matvec_q(const int8_t *weights, const float *scales,
     }
 }
 
-int qwen38_expert_forward(const Qwen38Expert *expert,
+int qwen38_expert_forward(Qwen38Expert *expert,
                           const Qwen38Config *config, const float *input,
                           float *output, float *workspace,
                           size_t workspace_floats) {
@@ -100,13 +105,18 @@ int qwen38_expert_forward(const Qwen38Expert *expert,
     int64_t matrix = (int64_t)hidden * intermediate;
     int64_t first_scales = (int64_t)intermediate * hidden_groups;
     float *gate = workspace, *up = workspace + intermediate;
-    matvec_q(expert->weights, expert->scales, intermediate, hidden,
+    if (qwen38_accel_expert(expert->matrices, output, expert->weights,
+                            expert->scales, input, hidden, intermediate,
+                            group)) return 0;
+    matvec_q(&expert->matrices[0], expert->weights, expert->scales,
+             intermediate, hidden,
              group, input, gate);
-    matvec_q(expert->weights + matrix, expert->scales + first_scales,
+    matvec_q(&expert->matrices[1], expert->weights + matrix,
+             expert->scales + first_scales,
              intermediate, hidden, group, input, up);
     for (int index = 0; index < intermediate; index++)
         gate[index] = gate[index] / (1.0f + expf(-gate[index])) * up[index];
-    matvec_q(expert->weights + 2 * matrix,
+    matvec_q(&expert->matrices[2], expert->weights + 2 * matrix,
              expert->scales + 2 * first_scales, hidden, intermediate,
              group, gate, output);
     return 0;

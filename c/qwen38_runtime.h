@@ -14,6 +14,7 @@ typedef struct {
 } Qwen38RuntimeLayer;
 
 typedef struct {
+    int accelerator_initialized;
     Qwen38Model model;
     Qwen38RuntimeLayer *layers;
     float *embedding, *lm_head;

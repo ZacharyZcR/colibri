@@ -65,6 +65,7 @@ void qwen38_runtime_close(Qwen38Runtime *runtime) {
     free(runtime->final_mix_up); free(runtime->hyper_a); free(runtime->hyper_b);
     free(runtime->hidden); free(runtime->workspace);
     qwen38_model_close(&runtime->model);
+    if (runtime->accelerator_initialized) qwen38_accel_shutdown();
     memset(runtime, 0, sizeof(*runtime));
 }
 
@@ -108,6 +109,11 @@ int qwen38_runtime_open(Qwen38Runtime *runtime, const char *source_dir,
     memset(runtime, 0, sizeof(*runtime));
     if (qwen38_model_open(&runtime->model, source_dir, expert_dir,
                           error, error_size)) return -1;
+    if (qwen38_accel_init(error, error_size)) {
+        qwen38_model_close(&runtime->model);
+        return -1;
+    }
+    runtime->accelerator_initialized = 1;
     Qwen38Config *config = &runtime->model.config;
     int64_t embedding_shape[] = {config->vocab_size, config->hidden_size};
     runtime->embedding = load(&runtime->model,
