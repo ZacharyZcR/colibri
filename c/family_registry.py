@@ -150,6 +150,63 @@ def _qwen36_geometry(config, context, _model_dir):
     return PlannerGeometry(kv, fixed, 0, _required_int(config, "num_experts", "qwen36"))
 
 
+def _qwen38_geometry(config, context, _model_dir):
+    """Qwen3.8-Flash-Next text runtime: DeltaNet/QSA hybrid plus mHC/PLE.
+
+    Linear layers own recurrent DeltaNet and causal-convolution state.  Full
+    attention layers retain ordinary GQA K/V and the QSA indexer's raw keys.
+    The PLE layer adds one more causal-convolution history; its very large
+    n-gram table is a model weight and is therefore accounted by inventory,
+    not duplicated here.
+    """
+    family = "qwen38_flash_next"
+    layers = _required_int(config, "num_hidden_layers", family)
+    experts = _required_int(config, "num_experts", family)
+    hidden = _required_int(config, "hidden_size", family)
+    kinds = config.get("layer_types")
+    if not isinstance(kinds, list) or len(kinds) != layers:
+        raise ValueError(f"{family}: layer_types must match num_hidden_layers")
+    n_linear = sum(kind == "linear_attention" for kind in kinds)
+    n_full = sum(kind == "full_attention" for kind in kinds)
+    if n_linear + n_full != layers or not n_linear or not n_full:
+        raise ValueError(f"{family}: layer_types must contain linear and full attention only")
+
+    key_heads = _required_int(config, "linear_num_key_heads", family)
+    key_dim = _required_int(config, "linear_key_head_dim", family)
+    value_heads = _required_int(config, "linear_num_value_heads", family)
+    value_dim = _required_int(config, "linear_value_head_dim", family)
+    conv_k = _required_int(config, "linear_conv_kernel_dim", family, 2)
+    conv_width = 2 * key_heads * key_dim + value_heads * value_dim
+    fixed = n_linear * (value_heads * key_dim * value_dim +
+                        conv_width * (conv_k - 1)) * 4
+
+    ple_layers = config.get("ple_layer_ids", [])
+    if not isinstance(ple_layers, list) or any(
+            isinstance(layer, bool) or not isinstance(layer, int) or
+            layer < 0 or layer >= layers for layer in ple_layers):
+        raise ValueError(f"{family}: invalid ple_layer_ids")
+    ple_dim = _required_int(config, "ple_embed_dim", family)
+    ple_conv_k = _required_int(config, "ple_conv_kernel_size", family, 2)
+    fixed += len(set(ple_layers)) * ple_dim * (ple_conv_k - 1) * 4
+
+    heads = _required_int(config, "num_attention_heads", family)
+    kv_heads = _required_int(config, "num_key_value_heads", family)
+    head_dim = _required_int(config, "head_dim", family)
+    index_heads = _required_int(config, "indexer_n_heads", family)
+    index_kv_heads = _required_int(config, "indexer_kv_heads", family)
+    index_dim = _required_int(config, "indexer_head_dim", family)
+    state = n_full * context * (
+        2 * kv_heads * head_dim + index_kv_heads * index_dim) * 4
+
+    hc_count = _required_int(config, "hc_count", family)
+    ws_linear = context * (2 * conv_width + hidden) * 4
+    ws_full = context * ((heads + 2 * kv_heads) * head_dim +
+                         (index_heads + index_kv_heads) * index_dim +
+                         heads * head_dim) * 4
+    ws_mhc = context * hc_count * hidden * 4
+    return PlannerGeometry(state, fixed, max(ws_linear, ws_full, ws_mhc), experts)
+
+
 def _olmoe_geometry(config, context, _model_dir):
     """Conventional full multi-head attention: every layer holds a K and a V
     cache in fp32, and olmoe.c sizes both at num_attention_heads * head_dim, not
@@ -461,6 +518,10 @@ _V4_EXPERT = re.compile(r"^layers\.(\d+)\.ffn\.experts\.(\d+)\.")
 _GLM53_EXPERT = re.compile(
     r"^model\.language_model\.layers\.(\d+)\.mlp\.experts\.(\d+)\."
 )
+_QWEN38_EXPERT = re.compile(
+    r"^(?:model\.language_model\.layers\.(\d+)|mtp\.layers\.(\d+))\."
+    r"mlp\.experts\.(?:gate_up_proj|down_proj)$"
+)
 _INKLING_EXPERT = re.compile(
     r"^model\.layers\.(\d+)\.mlp\.experts\."
     r"(?:gate_up_proj|down_proj)(?:\.|$)"
@@ -486,6 +547,21 @@ def _inkling_expert_inventory(name, size, config):
                          f"by {experts} experts")
     per_expert = size // experts
     layer = int(match.group(1))
+    return tuple((layer, expert, per_expert) for expert in range(experts))
+
+
+def _qwen38_expert_inventory(name, size, config):
+    match = _QWEN38_EXPERT.fullmatch(name)
+    if match is None:
+        return ()
+    experts = _required_int(config, "num_experts", "qwen38_flash_next")
+    if size % experts:
+        raise ValueError(f"qwen38_flash_next: fused expert tensor {name!r} "
+                         f"is not divisible by {experts} experts")
+    layer = (int(match.group(1)) if match.group(1) is not None else
+             _required_int(config, "num_hidden_layers", "qwen38_flash_next") +
+             int(match.group(2)))
+    per_expert = size // experts
     return tuple((layer, expert, per_expert) for expert in range(experts))
 
 
@@ -647,6 +723,33 @@ FAMILIES = (
         # the answer. False gives the user "use coli chat or coli serve", which
         # is true and actionable; chat/serve/web all work through the gateway.
         has_cli_adapter=False,
+        tune_prompt_template=(
+            "<|im_start|>user\n{prompt}<|im_end|>\n<|im_start|>assistant\n<think>\n"),
+    ),
+    FamilyDescriptor(
+        id="qwen38_flash_next",
+        model_types=("qwen4_exp", "qwen4_exp_text"),
+        display_name="Qwen3.8-Flash-Next",
+        display_scale="125B-A6B",
+        engine_artifact="qwen38_flash_next",
+        engine_aliases=(),
+        engine_group="qwen38_flash_next",
+        internal_arch="qwen38_flash_next",
+        build_target="qwen38_flash_next",
+        process_names=("qwen38_flash_next",),
+        default_model_id="qwen3.8-flash-next-colibri",
+        cli_adapter="qwen38_flash_next",
+        gateway_adapter="qwen38_flash_next",
+        planner_id="qwen38_deltanet_qsa_mhc_ple",
+        planner_geometry=_qwen38_geometry,
+        planner_unsupported_reason="",
+        expert_inventory=_qwen38_expert_inventory,
+        config_section="text_config",
+        limits=FamilyLimits(8192, 262144, 1024, 8192, 1, 8, "Q38_MAXT"),
+        capabilities=FamilyCapabilities(False, False, False, True),
+        has_gateway_adapter=False,
+        has_cli_adapter=False,
+        runtime_available=False,
         tune_prompt_template=(
             "<|im_start|>user\n{prompt}<|im_end|>\n<|im_start|>assistant\n<think>\n"),
     ),

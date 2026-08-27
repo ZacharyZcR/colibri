@@ -152,6 +152,70 @@ class FamilyRegistryTest(unittest.TestCase):
         for model_type in ("qwen2", "qwen3_moe", "my_qwen_model"):
             self.assertNotIn(model_type, by_type)
 
+    def test_qwen38_official_shape_models_qsa_deltanet_mhc_ple_and_mtp(self):
+        text = {
+            "model_type": "qwen4_exp_text", "num_hidden_layers": 48,
+            "hidden_size": 2560, "num_attention_heads": 24,
+            "num_key_value_heads": 2, "head_dim": 256,
+            "num_experts": 512, "num_experts_per_tok": 10,
+            "layer_types": (["linear_attention"] * 3 +
+                            ["full_attention"]) * 12,
+            "linear_num_key_heads": 16, "linear_key_head_dim": 128,
+            "linear_num_value_heads": 48, "linear_value_head_dim": 128,
+            "linear_conv_kernel_dim": 4,
+            "indexer_n_heads": 4, "indexer_kv_heads": 1,
+            "indexer_head_dim": 128, "indexer_budget": 2048,
+            "indexer_compress_ratio": 4,
+            "hc_count": 4, "hc_lowrank": 320,
+            "ple_layer_ids": [2], "ple_embed_dim": 2560,
+            "ple_conv_kernel_size": 4,
+        }
+        config = {"model_type": "qwen4_exp", "text_config": text}
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            (root / "config.json").write_text(json.dumps(config), encoding="utf-8")
+            resolved = resolve_model(root)
+        self.assertEqual(resolved.descriptor.id, "qwen38_flash_next")
+        self.assertFalse(resolved.descriptor.runtime_available)
+        geometry = planner_geometry(resolved, 4096)
+        self.assertEqual(geometry.configured_experts, 512)
+        self.assertEqual(
+            geometry.context_state_bytes,
+            12 * 4096 * (2 * 2 * 256 + 128) * 4)
+        self.assertEqual(
+            geometry.fixed_state_bytes,
+            (36 * (48 * 128 * 128 + (2 * 16 * 128 + 48 * 128) * 3) +
+             2560 * 3) * 4)
+        self.assertEqual(geometry.workspace_bytes, 4096 * 23040 * 4)
+
+        main = resolved.descriptor.expert_inventory(
+            "model.language_model.layers.47.mlp.experts.gate_up_proj",
+            512 * 17, text)
+        mtp = resolved.descriptor.expert_inventory(
+            "mtp.layers.0.mlp.experts.down_proj", 512 * 19, text)
+        self.assertEqual((main[0], main[-1]), ((47, 0, 17), (47, 511, 17)))
+        self.assertEqual((mtp[0], mtp[-1]), ((48, 0, 19), (48, 511, 19)))
+
+    def test_qwen38_rejects_unknown_attention_layer_type(self):
+        family = next(f for f in FAMILIES if f.id == "qwen38_flash_next")
+        config = {
+            "num_hidden_layers": 2, "hidden_size": 32,
+            "num_attention_heads": 2, "num_key_value_heads": 1,
+            "head_dim": 8, "num_experts": 4,
+            "layer_types": ["linear_attention", "sparse_attention"],
+            "linear_num_key_heads": 1, "linear_key_head_dim": 8,
+            "linear_num_value_heads": 2, "linear_value_head_dim": 8,
+            "linear_conv_kernel_dim": 4,
+            "indexer_n_heads": 1, "indexer_kv_heads": 1,
+            "indexer_head_dim": 8, "hc_count": 2,
+            "ple_layer_ids": [], "ple_embed_dim": 32,
+            "ple_conv_kernel_size": 4,
+        }
+        resolved = type("R", (), {"descriptor": family,
+                                  "family_config": config, "model_dir": "."})()
+        with self.assertRaisesRegex(ValueError, "linear and full attention only"):
+            planner_geometry(resolved, 16)
+
     def test_glm53_official_shape_models_kda_dsa_mhc_and_mtp_inventory(self):
         config = {
             "model_type": "glm5_next",
@@ -955,6 +1019,9 @@ class FamilyRegistryTest(unittest.TestCase):
             # there lands on an EOS special (measured gen=0).
             "qwen36": "<|im_start|>user\nhello {world}<|im_end|>\n"
                       "<|im_start|>assistant\n<think>\n",
+            "qwen38_flash_next":
+                "<|im_start|>user\nhello {world}<|im_end|>\n"
+                "<|im_start|>assistant\n<think>\n",
             "deepseek_v4": "hello {world}",
         }
         self.assertEqual(
