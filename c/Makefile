@@ -1088,8 +1088,11 @@ tests/test_qwen38_qsa$(EXE): tests/test_qwen38_qsa.c qwen38_qsa.c qwen38_qsa.h
 tests/test_qwen38_ple_table$(EXE): tests/test_qwen38_ple_table.c qwen38_ple_table.c qwen38_ple_table.h st.h
 	$(CC) $(CFLAGS) tests/test_qwen38_ple_table.c qwen38_ple_table.c -o $@ $(LDFLAGS)
 
-tests/test_qwen38_model$(EXE): tests/test_qwen38_model.c qwen38_model.c qwen38_model.h qwen38_expert.c qwen38_expert.h qwen38_moe_layer.c qwen38_moe_layer.h qwen38_mhc.c qwen38_mhc.h qwen38_delta_layer.c qwen38_delta_layer.h qwen38_delta.c qwen38_delta.h qwen38_linear_layer.c qwen38_linear_layer.h qwen38_config.c qwen38_config.h qwen38_ple_table.c qwen38_ple_table.h st.h json.h
-	$(CC) $(CFLAGS) tests/test_qwen38_model.c qwen38_model.c qwen38_expert.c qwen38_moe_layer.c qwen38_mhc.c qwen38_delta_layer.c qwen38_delta.c qwen38_linear_layer.c qwen38_config.c qwen38_ple_table.c -o $@ $(LDFLAGS)
+tests/test_qwen38_ple_layer$(EXE): tests/test_qwen38_ple_layer.c qwen38_ple_layer.c qwen38_ple_layer.h qwen38_ple_hash.c qwen38_ple_hash.h qwen38_ple_table.c qwen38_ple_table.h qwen38_model.h qwen38_config.h st.h
+	$(CC) $(CFLAGS) tests/test_qwen38_ple_layer.c qwen38_ple_layer.c qwen38_ple_hash.c qwen38_ple_table.c -o $@ $(LDFLAGS)
+
+tests/test_qwen38_model$(EXE): tests/test_qwen38_model.c qwen38_model.c qwen38_model.h qwen38_expert.c qwen38_expert.h qwen38_moe_layer.c qwen38_moe_layer.h qwen38_mhc.c qwen38_mhc.h qwen38_delta_layer.c qwen38_delta_layer.h qwen38_delta.c qwen38_delta.h qwen38_linear_layer.c qwen38_linear_layer.h qwen38_ple_layer.c qwen38_ple_layer.h qwen38_ple_hash.c qwen38_ple_hash.h qwen38_config.c qwen38_config.h qwen38_ple_table.c qwen38_ple_table.h st.h json.h
+	$(CC) $(CFLAGS) tests/test_qwen38_model.c qwen38_model.c qwen38_expert.c qwen38_moe_layer.c qwen38_mhc.c qwen38_delta_layer.c qwen38_delta.c qwen38_linear_layer.c qwen38_ple_layer.c qwen38_ple_hash.c qwen38_config.c qwen38_ple_table.c -o $@ $(LDFLAGS)
 
 tests/test_qwen38_expert$(EXE): tests/test_qwen38_expert.c qwen38_expert.c qwen38_expert.h qwen38_model.h qwen38_config.h st.h
 	$(CC) $(CFLAGS) tests/test_qwen38_expert.c qwen38_expert.c -o $@ $(LDFLAGS)

@@ -153,11 +153,17 @@ int qwen38_model_open(Qwen38Model *model, const char *source_dir,
         validate_experts(model, error, error_size)) goto fail;
     for (int index = 0; index < config->ple_layer_count; index++) {
         char prefix[256];
+        int ngram_heads = (config->ngram_size - 1) * config->heads_per_ngram;
+        if (config->ple_embed_dim % ngram_heads) {
+            fail(error, error_size, "PLE embedding width is not head divisible");
+            goto fail;
+        }
         snprintf(prefix, sizeof(prefix),
                  "model.language_model.layers.%d.ple.ple_embedding.ngram_embedding",
                  config->ple_layers[index] - 1);
         if (qwen38_ple_table_open(&model->ple[index], &model->source, prefix,
-                                  config->ngram_parts, config->ple_embed_dim)) {
+                                  config->ngram_parts,
+                                  config->ple_embed_dim / ngram_heads)) {
             fail(error, error_size, "cannot map PLE table for layer %d",
                  config->ple_layers[index]);
             goto fail;

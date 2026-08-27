@@ -19,6 +19,7 @@ static const char *config_json =
     "\"indexer_budget\":8,\"indexer_compress_ratio\":2,"
     "\"indexer_head_dim\":4,\"indexer_kv_heads\":1,\"indexer_n_heads\":2,"
     "\"mtp_num_hidden_layers\":1,\"rms_norm_eps\":0.000001,"
+    "\"eos_token_id\":31,"
     "\"partial_rotary_factor\":0.5,"
     "\"ple_layer_ids\":[2],"
     "\"rope_parameters\":{\"rope_theta\":10000},"

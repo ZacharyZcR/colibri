@@ -45,6 +45,7 @@ int qwen38_config_parse(const char *json, Qwen38Config *config,
                         char *error, size_t error_size) {
     if (!json || !config) return fail(error, error_size, "missing config input");
     memset(config, 0, sizeof(*config));
+    config->seed = 1234;
     char *arena = NULL;
     jval *root = json_parse(json, &arena);
     int result = -1;
@@ -95,6 +96,7 @@ int qwen38_config_parse(const char *json, Qwen38Config *config,
     INT("indexer_kv_heads", indexer_kv_heads);
     INT("indexer_n_heads", indexer_heads);
     INT("mtp_num_hidden_layers", mtp_layers);
+    INT("eos_token_id", eos_token_id);
     NUM("rms_norm_eps", rms_norm_eps);
     NUM("partial_rotary_factor", partial_rotary_factor);
 
@@ -102,6 +104,15 @@ int qwen38_config_parse(const char *json, Qwen38Config *config,
     if (!rope || rope->t != J_OBJ ||
         number(rope, "rope_theta", &config->rope_theta, error, error_size))
         goto done;
+    jval *seed = json_get(text, "seed");
+    if (seed) {
+        if (seed->t != J_NUM || seed->num < 0 || seed->num > 9007199254740991.0 ||
+            seed->num != (uint64_t)seed->num) {
+            fail(error, error_size, "invalid text_config.seed");
+            goto done;
+        }
+        config->seed = (uint64_t)seed->num;
+    }
     jval *layers = json_get(text, "layer_types");
     if (config->num_hidden_layers > QWEN38_MAX_LAYERS || !layers ||
         layers->t != J_ARR || layers->len != config->num_hidden_layers) {

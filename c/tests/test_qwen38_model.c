@@ -4,6 +4,7 @@
 #include "../qwen38_moe_layer.h"
 #include "../qwen38_delta_layer.h"
 #include "../qwen38_linear_layer.h"
+#include "../qwen38_ple_layer.h"
 
 #include <assert.h>
 #include <stdarg.h>
@@ -92,7 +93,7 @@ static void source_fixture(const char *directory) {
         "\"heads_per_ngram\":2,\"ple_layer_ids\":[2],"
         "\"indexer_budget\":8,\"indexer_compress_ratio\":2,"
         "\"indexer_head_dim\":4,\"indexer_kv_heads\":1,\"indexer_n_heads\":2,"
-        "\"mtp_num_hidden_layers\":1,\"rms_norm_eps\":0.000001,"
+        "\"mtp_num_hidden_layers\":1,\"eos_token_id\":31,\"rms_norm_eps\":0.000001,"
         "\"partial_rotary_factor\":0.5,"
         "\"rope_parameters\":{\"rope_theta\":10000},"
         "\"layer_types\":[\"linear_attention\",\"linear_attention\","
@@ -108,7 +109,7 @@ static void source_fixture(const char *directory) {
         char name[256];
         snprintf(name, sizeof(name), "model.language_model.layers.1.ple."
                  "ple_embedding.ngram_embedding.shard_%d.weight", shard);
-        add_tensor(&header, &first, name, "BF16", "[2,16]", &offset, 2 * 16 * 2);
+        add_tensor(&header, &first, name, "BF16", "[102,8]", &offset, 102 * 8 * 2);
     }
     const struct { const char *name, *shape; size_t count; } dense[] = {
         {"model.language_model.layers.0.mlp_hyper_connection.hc_norm.weight", "[32]", 32},
@@ -147,6 +148,17 @@ static void source_fixture(const char *directory) {
     for (size_t index = 0; index < sizeof(attention_hyper) / sizeof(attention_hyper[0]); index++)
         add_tensor(&header, &first, attention_hyper[index].name, "BF16",
                    attention_hyper[index].shape, &offset, attention_hyper[index].count * 2);
+    const struct { const char *name, *shape; size_t count; } ple[] = {
+        {"model.language_model.layers.1.ple.key_proj.weight", "[32,16]", 32 * 16},
+        {"model.language_model.layers.1.ple.value_proj.weight", "[16,16]", 16 * 16},
+        {"model.language_model.layers.1.ple.norm_key.weight", "[32]", 32},
+        {"model.language_model.layers.1.ple.norm_query.weight", "[32]", 32},
+        {"model.language_model.layers.1.ple.norm_conv.weight", "[32]", 32},
+        {"model.language_model.layers.1.ple.conv1d.weight", "[32,1,3]", 32 * 3},
+    };
+    for (size_t index = 0; index < sizeof(ple) / sizeof(ple[0]); index++)
+        add_tensor(&header, &first, ple[index].name, "BF16", ple[index].shape,
+                   &offset, ple[index].count * 2);
     write_safetensors(directory, &header, offset);
     free(header.text);
 }
@@ -193,8 +205,8 @@ int main(void) {
     char error[256] = {0};
     assert(qwen38_model_open(&model, source, overlay, error, sizeof(error)) == 0);
     assert(model.expert_bits == 4 && model.expert_group_size == 0);
-    assert(model.source.n == 26 && model.experts.n == 80);
-    assert(model.ple[0].row_offsets[2] == 4);
+    assert(model.source.n == 32 && model.experts.n == 80);
+    assert(model.ple[0].row_offsets[2] == 204);
     Qwen38Expert expert;
     assert(qwen38_expert_load(&model, 4, 7, &expert, error, sizeof(error)) == 0);
     for (int index = 0; index < 3 * 16 * 6; index++) assert(expert.weights[index] == 0);
@@ -239,12 +251,23 @@ int main(void) {
     size_t linear_workspace_size = qwen38_linear_layer_workspace_floats(&model.config);
     float *linear_workspace = malloc(linear_workspace_size * sizeof(float));
     assert(linear_workspace);
-    assert(qwen38_linear_layer_step(&model, 0, &linear, hyper_input, hyper_output,
+    assert(qwen38_linear_layer_step(&model, 0, &linear, 7, hyper_input, hyper_output,
                                     linear_workspace, linear_workspace_size,
                                     error, sizeof(error)) == 0);
     for (int index = 0; index < 32; index++) assert(hyper_output[index] == hyper_input[index]);
     free(linear_workspace);
     qwen38_linear_layer_close(&linear);
+    Qwen38PleLayer ple_layer;
+    assert(qwen38_ple_layer_load(&model, 1, &ple_layer, error, sizeof(error)) == 0);
+    size_t ple_workspace_size = qwen38_ple_layer_workspace_floats(&model.config);
+    float *ple_workspace = malloc(ple_workspace_size * sizeof(float));
+    assert(ple_workspace);
+    assert(qwen38_ple_layer_step(&model, &ple_layer, 7, hyper_input, hyper_output,
+                                 ple_workspace, ple_workspace_size,
+                                 error, sizeof(error)) == 0);
+    for (int index = 0; index < 32; index++) assert(hyper_output[index] == hyper_input[index]);
+    free(ple_workspace);
+    qwen38_ple_layer_close(&ple_layer);
     uint64_t row = 3; float result[16];
     assert(qwen38_ple_table_lookup(&model.ple[0], &row, 1, result, 16) == 0);
     for (int index = 0; index < 16; index++) assert(result[index] == 0.0f);

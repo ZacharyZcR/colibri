@@ -43,6 +43,7 @@ void qwen38_linear_layer_close(Qwen38LinearLayer *weights) {
     qwen38_delta_layer_close(&weights->delta);
     qwen38_delta_state_close(&weights->state);
     qwen38_moe_layer_close(&weights->moe);
+    qwen38_ple_layer_close(&weights->ple);
     memset(weights, 0, sizeof(*weights));
 }
 
@@ -76,6 +77,10 @@ int qwen38_linear_layer_load(Qwen38Model *model, int layer,
     if (qwen38_delta_layer_load(model, layer, &weights->delta, error, error_size) ||
         qwen38_delta_state_init(&weights->state, config) ||
         qwen38_moe_layer_load(model, layer, &weights->moe, error, error_size)) goto fail;
+    for (int index = 0; index < config->ple_layer_count; index++)
+        weights->has_ple |= config->ple_layers[index] == layer + 1;
+    if (weights->has_ple &&
+        qwen38_ple_layer_load(model, layer, &weights->ple, error, error_size)) goto fail;
     return 0;
 fail:
     qwen38_linear_layer_close(weights);
@@ -89,15 +94,18 @@ size_t qwen38_linear_layer_workspace_floats(const Qwen38Config *config) {
                                                   config->hc_lowrank);
     size_t delta = qwen38_delta_workspace_floats(config);
     size_t moe = qwen38_moe_layer_workspace_floats(config);
+    size_t ple = qwen38_ple_layer_workspace_floats(config);
     if (scratch < delta) scratch = delta;
     if (scratch < moe) scratch = moe;
+    if (scratch < ple) scratch = ple;
     return scratch + (size_t)config->hc_count * config->hidden_size +
            2ULL * config->hidden_size + config->hc_count;
 }
 
 int qwen38_linear_layer_step(Qwen38Model *model, int layer,
                              Qwen38LinearLayer *weights,
-                             const float *hyper_input, float *hyper_output,
+                             int64_t token, const float *hyper_input,
+                             float *hyper_output,
                              float *workspace, size_t workspace_floats,
                              char *error, size_t error_size) {
     if (!model || !weights || !hyper_input || !hyper_output || !workspace ||
@@ -114,13 +122,21 @@ int qwen38_linear_layer_step(Qwen38Model *model, int layer,
     float *mixed = attention_hyper + (size_t)config->hc_count * config->hidden_size;
     float *block = mixed + config->hidden_size;
     float *injection = block + config->hidden_size;
-    if (qwen38_mhc_mix(hyper_input, config->hc_count, config->hidden_size,
+    const float *layer_input = hyper_input;
+    if (weights->has_ple) {
+        if (qwen38_ple_layer_step(model, &weights->ple, token, hyper_input,
+                                  attention_hyper, scratch, scratch_size,
+                                  error, error_size))
+            return fail(error, error_size, "PLE layer %d forward failed", layer);
+        layer_input = attention_hyper;
+    }
+    if (qwen38_mhc_mix(layer_input, config->hc_count, config->hidden_size,
                        config->hc_lowrank, config->rms_norm_eps, weights->norm,
                        weights->mix_down, weights->mix_up, weights->inject,
                        mixed, injection, scratch, scratch_size) ||
         qwen38_delta_step(config, &weights->delta.view, &weights->state,
                           mixed, block, scratch, scratch_size) ||
-        qwen38_mhc_inject(hyper_input, block, injection, config->hc_count,
+        qwen38_mhc_inject(layer_input, block, injection, config->hc_count,
                           config->hidden_size, attention_hyper) ||
         qwen38_moe_layer_forward(model, layer, &weights->moe, attention_hyper,
                                  hyper_output, scratch, scratch_size,
