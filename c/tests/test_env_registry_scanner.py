@@ -48,3 +48,12 @@ class RegistryScannerTest(unittest.TestCase):
         (self.root / "tests").mkdir()
         (self.root / "tests" / "fixture.c").write_text('getenv("FIXTURE_ONLY");')
         self.assertEqual(registry.scan_sources(), {})
+
+    def test_included_sources_are_scanned(self):
+        for suffix in ("inc", "cuh"):
+            with self.subTest(suffix=suffix):
+                path = self.root / ("engine." + suffix)
+                path.write_text('getenv("COLI_INCLUDED");')
+                self.assertEqual(registry.scan_sources(),
+                                 {"COLI_INCLUDED": [path.name + ":1"]})
+                path.unlink()

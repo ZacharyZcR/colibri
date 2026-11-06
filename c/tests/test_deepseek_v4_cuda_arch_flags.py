@@ -95,6 +95,17 @@ class DeepseekV4CudaArchFlagsTest(unittest.TestCase):
                 os.utime(f, (aged, aged))
         return calls
 
+    def test_private_target_header_rebuilds_backend(self):
+        self.assertEqual(self.build("CUDA=1", "CUDA_ARCH=sm_86"), 1)
+        header = self.dir / "backend_cuda_dsv4_target.h"
+        os.utime(header, None)
+        self.assertEqual(self.build("CUDA=1", "CUDA_ARCH=sm_86"), 1)
+
+    def test_cuda_rules_have_no_overridden_recipes(self):
+        result = self.make("-n", OBJ, "CUDA=1", "CUDA_ARCH=sm_86")
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertNotIn("overriding recipe", result.stderr)
+
     def test_same_arch_does_not_rebuild(self):
         """The guard: a fix that always recompiles would pass the tests below."""
         self.assertEqual(self.build("CUDA=1", "CUDA_ARCH=sm_86"), 1)
